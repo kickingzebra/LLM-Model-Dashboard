@@ -1,8 +1,12 @@
+const fs = require('node:fs/promises');
 const { spawn } = require('node:child_process');
 
 function createSystemService({
   fetchImpl = global.fetch,
   runCommand = defaultRunCommand,
+  modelProbeScriptPath = null,
+  probeResultsPath = null,
+  now = defaultTimestamp,
   openclawHealthUrl = 'http://127.0.0.1:18789/health',
   ollamaTagsUrl = 'http://127.0.0.1:11434/api/tags'
 } = {}) {
@@ -44,8 +48,97 @@ function createSystemService({
         ok: true,
         message: 'OpenClaw gateway restarted.'
       };
+    },
+    async getProbeResults() {
+      if (!probeResultsPath) {
+        return [];
+      }
+
+      try {
+        const text = await fs.readFile(probeResultsPath, 'utf8');
+        const parsed = JSON.parse(text);
+        return Array.isArray(parsed.entries) ? parsed.entries : [];
+      } catch (error) {
+        if (error.code === 'ENOENT') {
+          return [];
+        }
+
+        throw error;
+      }
+    },
+    async runModelProbe(modelId) {
+      if (!modelProbeScriptPath) {
+        return {
+          ok: false,
+          skipped: true,
+          message: 'Model probe script is not configured.',
+          entries: []
+        };
+      }
+
+      const result = await runCommand('/bin/bash', [modelProbeScriptPath, modelId]);
+      if (result.code !== 0) {
+        return {
+          ok: false,
+          skipped: false,
+          message: result.stderr || 'Model probe failed.',
+          entries: []
+        };
+      }
+
+      const entries = parseModelProbeOutput(result.stdout).map((entry) => ({
+        timestamp: now(),
+        ...entry
+      }));
+
+      if (probeResultsPath && entries.length > 0) {
+        const existing = await this.getProbeResults();
+        await fs.writeFile(
+          probeResultsPath,
+          `${JSON.stringify({ entries: [...entries, ...existing].slice(0, 50) }, null, 2)}\n`,
+          'utf8'
+        );
+      }
+
+      return {
+        ok: true,
+        skipped: false,
+        message: 'Direct Ollama capability probe completed.',
+        entries
+      };
     }
   };
+}
+
+function parseModelProbeOutput(stdout) {
+  const blocks = stdout
+    .split('-----')
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  return blocks.map((block) => {
+    const map = {};
+    for (const line of block.split('\n')) {
+      const index = line.indexOf('=');
+      if (index === -1) {
+        continue;
+      }
+
+      const key = line.slice(0, index);
+      const value = line.slice(index + 1);
+      map[key] = value;
+    }
+
+    return {
+      model: map.MODEL || '',
+      chatHttp: map.CHAT_HTTP || '',
+      chatOk: map.CHAT_OK || '',
+      chatSummary: map.CHAT_SUMMARY || '',
+      toolsHttp: map.TOOLS_HTTP || '',
+      toolsOutcome: map.TOOLS_OUTCOME || '',
+      toolsSummary: map.TOOLS_SUMMARY || ''
+    };
+  });
 }
 
 async function fetchJson(fetchImpl, url, label) {
@@ -107,6 +200,11 @@ async function defaultRunCommand(command, args) {
   });
 }
 
+function defaultTimestamp() {
+  return new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+}
+
 module.exports = {
-  createSystemService
+  createSystemService,
+  parseModelProbeOutput
 };

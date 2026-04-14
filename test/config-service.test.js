@@ -97,6 +97,56 @@ test('saving creates a backup before writing the updated config', async () => {
   assert.equal(written.agents.defaults.models.fallback.model, 'llama3.1:8b');
 });
 
+test('resetting the config restores the seed copy and creates a backup first', async () => {
+  const { configPath, tempDir } = await createTempConfigFixture();
+  const seedPath = path.join(tempDir, 'openclaw.seed.json');
+  const auditLogPath = path.join(tempDir, 'model-history.log.json');
+  await fs.copyFile(path.join(__dirname, 'fixtures', 'openclaw.valid.json'), seedPath);
+
+  const service = createConfigService({
+    configPath,
+    resetSourcePath: seedPath,
+    auditLogPath,
+    now: () => '20260414T120000'
+  });
+
+  await service.savePrimaryModel({ modelId: 'qwen3:8b' });
+  const resetResult = await service.resetConfig();
+  const written = JSON.parse(await fs.readFile(configPath, 'utf8'));
+
+  assert.equal(resetResult.validation.ok, true);
+  assert.equal(resetResult.restored, true);
+  assert.equal(written.agents.defaults.model.primary, 'llama3.2:3b');
+  assert.equal(written.agents.defaults.models.chat.model, 'llama3.2:3b');
+  assert.equal(written.agents.defaults.models.fallback.model, 'llama3.1:8b');
+});
+
+test('saving and resetting append model audit entries to the history log', async () => {
+  const { configPath, tempDir } = await createTempConfigFixture();
+  const seedPath = path.join(tempDir, 'openclaw.seed.json');
+  const auditLogPath = path.join(tempDir, 'model-history.log.json');
+  await fs.copyFile(path.join(__dirname, 'fixtures', 'openclaw.valid.json'), seedPath);
+
+  const service = createConfigService({
+    configPath,
+    resetSourcePath: seedPath,
+    auditLogPath,
+    now: () => '20260414T121500'
+  });
+
+  await service.savePrimaryModel({ modelId: 'qwen3:8b' });
+  await service.resetConfig();
+
+  const history = JSON.parse(await fs.readFile(auditLogPath, 'utf8'));
+
+  assert.equal(history.entries.length, 2);
+  assert.equal(history.entries[0].action, 'resetConfig');
+  assert.equal(history.entries[0].previousPrimaryModel, 'qwen3:8b');
+  assert.equal(history.entries[0].nextPrimaryModel, 'llama3.2:3b');
+  assert.equal(history.entries[1].action, 'savePrimaryModel');
+  assert.equal(history.entries[1].nextPrimaryModel, 'qwen3:8b');
+});
+
 test('invalid JSON is rejected before any write', async () => {
   const { configPath } = await createTempConfigFixture();
   const service = createConfigService({ configPath, now: () => '20260414T103000' });

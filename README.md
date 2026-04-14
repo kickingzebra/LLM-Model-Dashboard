@@ -55,6 +55,9 @@ npm run start:test-config
 ```
 
 That uses [local-data/openclaw.test.json](/Users/ziabasit/Documents/New project/openclaw-dashboard/local-data/openclaw.test.json) as a sandbox copy.
+The reset button restores that file from [local-data/openclaw.test.seed.json](/Users/ziabasit/Documents/New project/openclaw-dashboard/local-data/openclaw.test.seed.json).
+Recent sandbox model changes are logged to `local-data/model-history.log.json`.
+Direct Ollama probe results are logged to `local-data/model-probe-results.json`.
 
 ## Safety Guarantees
 
@@ -75,7 +78,16 @@ Current automated coverage includes:
 - secret masking
 - health checks
 - restart behavior
+- direct Ollama capability probe parsing and persistence
 - HTTP handler integration for the MVP flows
+
+After each model change in the sandbox dashboard, the app can run the documented direct Ollama capability probe from [../scripts/ollama_tool_probe.sh](../scripts/ollama_tool_probe.sh). That covers:
+
+- plain chat check
+- tools payload acceptance
+- structured tool-call return
+
+The broader OpenClaw confirmation pass from the test matrix is still a second-stage check rather than part of this local dashboard automation.
 
 Run the suite with:
 

@@ -134,7 +134,12 @@ function maskSecrets(input) {
   return output;
 }
 
-function createConfigService({ configPath, now = defaultTimestamp }) {
+function createConfigService({
+  configPath,
+  resetSourcePath = null,
+  auditLogPath = null,
+  now = defaultTimestamp
+}) {
   async function loadConfigText() {
     return fs.readFile(configPath, 'utf8');
   }
@@ -152,6 +157,72 @@ function createConfigService({ configPath, now = defaultTimestamp }) {
     return backupPath;
   }
 
+  async function loadHistory() {
+    if (!auditLogPath) {
+      return [];
+    }
+
+    try {
+      const text = await fs.readFile(auditLogPath, 'utf8');
+      const parsed = JSON.parse(text);
+      return Array.isArray(parsed.entries) ? parsed.entries : [];
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        return [];
+      }
+
+      throw error;
+    }
+  }
+
+  async function appendHistory(entry) {
+    if (!auditLogPath) {
+      return;
+    }
+
+    const entries = await loadHistory();
+    entries.unshift(entry);
+    const payload = {
+      entries: entries.slice(0, 50)
+    };
+    await fs.writeFile(auditLogPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  }
+
+  async function resetConfig() {
+    if (!resetSourcePath) {
+      throw new Error('Reset is not configured for this dashboard.');
+    }
+
+    const currentConfig = await loadConfig();
+    const sourceText = await fs.readFile(resetSourcePath, 'utf8');
+    const validation = validateConfigText(sourceText);
+    if (!validation.ok) {
+      throw new Error(validation.error);
+    }
+
+    const backupPath = await createBackup();
+    await fs.writeFile(configPath, `${validation.formatted}\n`, 'utf8');
+    await appendHistory({
+      timestamp: now(),
+      action: 'resetConfig',
+      previousPrimaryModel: currentConfig.agents?.defaults?.model?.primary || null,
+      nextPrimaryModel: JSON.parse(validation.formatted).agents?.defaults?.model?.primary || null,
+      backupPath
+    });
+
+    return {
+      config: JSON.parse(validation.formatted),
+      validation: {
+        ok: true,
+        message: 'Validation passed.'
+      },
+      backup: {
+        path: backupPath
+      },
+      restored: true
+    };
+  }
+
   async function writeValidatedText(text) {
     const validation = validateConfigText(text);
     if (!validation.ok) {
@@ -167,8 +238,10 @@ function createConfigService({ configPath, now = defaultTimestamp }) {
     loadConfig,
     loadConfigText,
     getMaskedConfig: async () => maskSecrets(await loadConfig()),
+    getHistory: loadHistory,
     savePrimaryModel: async (options) => {
       const config = await loadConfig();
+      const previousPrimaryModel = config?.agents?.defaults?.model?.primary || null;
       const updated = switchPrimaryModel(config, options);
       const text = JSON.stringify(updated, null, 2);
       const validation = validateConfigText(text);
@@ -178,6 +251,13 @@ function createConfigService({ configPath, now = defaultTimestamp }) {
 
       const backupPath = await createBackup();
       await fs.writeFile(configPath, `${validation.formatted}\n`, 'utf8');
+      await appendHistory({
+        timestamp: now(),
+        action: 'savePrimaryModel',
+        previousPrimaryModel,
+        nextPrimaryModel: options.modelId,
+        backupPath
+      });
 
       return {
         config: updated,
@@ -193,7 +273,8 @@ function createConfigService({ configPath, now = defaultTimestamp }) {
     },
     writeRawConfig: writeValidatedText,
     validateText: validateConfigText,
-    createBackup
+    createBackup,
+    resetConfig
   };
 }
 

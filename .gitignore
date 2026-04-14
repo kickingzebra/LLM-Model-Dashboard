@@ -1,2 +1,4 @@
 .DS_Store
 local-data/*.bak.*
+local-data/model-history.log.json
+local-data/model-probe-results.json
