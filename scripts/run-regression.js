@@ -86,7 +86,7 @@ EOF
     const savedConfig = JSON.parse(await fs.readFile(configPath, 'utf8'));
     assert.equal(savedConfig.agents.defaults.model.primary, 'qwen3:8b');
     assert.equal(savedConfig.agents.defaults.models.primary.model, 'qwen3:8b');
-    assert.equal(savedConfig.agents.defaults.models.chat.model, 'qwen3:8b');
+    assert.equal(savedConfig.agents.defaults.models.chat.model, 'llama3.2:3b');
     assert.equal(savedConfig.agents.defaults.routing.primaryModel, 'qwen3:8b');
 
     const backupStat = await fs.stat(saveResult.backup.path);
