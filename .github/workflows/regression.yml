@@ -1,0 +1,53 @@
+name: Regression
+
+on:
+  push:
+    branches:
+      - main
+      - 'feature/**'
+      - 'codex/**'
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    name: Regression (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node:
+          - 22
+          - 24
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Show versions
+        run: |
+          node --version
+          npm --version
+
+      - name: Run full regression suite
+        run: npm run ci
+
+      - name: Upload regression artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-debug-node-${{ matrix.node }}
+          path: |
+            local-data
+            test
+            src

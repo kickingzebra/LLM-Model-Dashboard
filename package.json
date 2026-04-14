@@ -6,6 +6,11 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/index.js",
-    "test": "node --test"
+    "start:test-config": "OPENCLAW_CONFIG_PATH=./local-data/openclaw.test.json node src/index.js",
+    "test": "node --test",
+    "test:unit": "node --test",
+    "test:smoke": "node scripts/run-regression.js",
+    "test:regression": "npm run test:unit && npm run test:smoke",
+    "ci": "npm run test:regression"
   }
 }

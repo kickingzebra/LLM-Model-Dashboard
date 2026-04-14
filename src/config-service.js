@@ -171,8 +171,25 @@ function createConfigService({ configPath, now = defaultTimestamp }) {
       const config = await loadConfig();
       const updated = switchPrimaryModel(config, options);
       const text = JSON.stringify(updated, null, 2);
-      await writeValidatedText(text);
-      return updated;
+      const validation = validateConfigText(text);
+      if (!validation.ok) {
+        throw new Error(validation.error);
+      }
+
+      const backupPath = await createBackup();
+      await fs.writeFile(configPath, `${validation.formatted}\n`, 'utf8');
+
+      return {
+        config: updated,
+        validation: {
+          ok: true,
+          message: 'Validation passed.'
+        },
+        backup: {
+          path: backupPath
+        },
+        saved: true
+      };
     },
     writeRawConfig: writeValidatedText,
     validateText: validateConfigText,

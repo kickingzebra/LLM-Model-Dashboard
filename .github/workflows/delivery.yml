@@ -1,0 +1,39 @@
+name: Delivery
+
+on:
+  workflow_run:
+    workflows:
+      - Regression
+    types:
+      - completed
+
+jobs:
+  package:
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Create release bundle
+        run: |
+          mkdir -p dist
+          tar -czf dist/openclaw-dashboard-${{ github.event.workflow_run.head_sha }}.tar.gz \
+            package.json \
+            README.md \
+            LICENSE \
+            src \
+            local-data \
+            test
+
+      - name: Upload delivery bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: openclaw-dashboard-bundle
+          path: dist/*.tar.gz

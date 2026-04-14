@@ -52,7 +52,9 @@ test('saving a model switch updates config and returns success feedback', async 
 
   assert.equal(response.statusCode, 200);
   assert.equal(payload.ok, true);
-  assert.match(payload.message, /saved/i);
+  assert.equal(payload.validation.ok, true);
+  assert.match(payload.message, /validation passed/i);
+  assert.match(payload.backup.path, /openclaw\.json\.bak\.20260414T111500$/);
   assert.equal(saved.agents.defaults.model.primary, 'qwen3:8b');
 });
 

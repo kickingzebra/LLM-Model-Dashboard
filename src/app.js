@@ -48,7 +48,7 @@ function createApp(options) {
 
       if (request.method === 'POST' && request.url === '/api/config/primary-model') {
         const body = await readJsonBody(request);
-        await configService.savePrimaryModel({
+        const result = await configService.savePrimaryModel({
           modelId: body.modelId,
           addToCatalog: body.addToCatalog,
           catalogEntry: body.catalogEntry
@@ -56,7 +56,10 @@ function createApp(options) {
 
         return sendJson(response, 200, {
           ok: true,
-          message: `Primary model saved as ${body.modelId}.`
+          message: `Validation passed. Backup created. Primary model saved as ${body.modelId}.`,
+          validation: result.validation,
+          backup: result.backup,
+          saved: result.saved
         });
       }
 
@@ -348,7 +351,12 @@ function renderDashboardHtml() {
         })
       });
       const payload = await response.json();
-      setMessage('save-status', payload.message || 'Saved.', !response.ok);
+      const statusText = response.ok
+        ? (payload.validation?.message || 'Validation passed.') +
+          ' Backup: ' + (payload.backup?.path || 'created') +
+          '. Primary model saved.'
+        : (payload.message || 'Save failed.');
+      setMessage('save-status', statusText, !response.ok);
       if (response.ok) {
         await loadState();
       }

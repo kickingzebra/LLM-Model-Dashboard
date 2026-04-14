@@ -79,7 +79,7 @@ test('saving creates a backup before writing the updated config', async () => {
   const { configPath } = await createTempConfigFixture();
   const service = createConfigService({ configPath, now: () => '20260414T103000' });
 
-  await service.savePrimaryModel({
+  const result = await service.savePrimaryModel({
     modelId: 'qwen3:8b'
   });
 
@@ -88,6 +88,8 @@ test('saving creates a backup before writing the updated config', async () => {
   const written = JSON.parse(await fs.readFile(configPath, 'utf8'));
 
   assert.ok(backupName);
+  assert.equal(result.validation.ok, true);
+  assert.equal(result.backup.path.endsWith('openclaw.json.bak.20260414T103000'), true);
   assert.equal(written.agents.defaults.model.primary, 'qwen3:8b');
   assert.equal(written.agents.defaults.models.primary.model, 'qwen3:8b');
   assert.equal(written.agents.defaults.models.chat.model, 'qwen3:8b');

@@ -48,6 +48,14 @@ The default dashboard port is `3024`. Set `PORT` if you want a different one.
 
 Then open `http://127.0.0.1:3024`.
 
+For a safe local dry run without touching a live OpenClaw config:
+
+```bash
+npm run start:test-config
+```
+
+That uses [local-data/openclaw.test.json](/Users/ziabasit/Documents/New project/openclaw-dashboard/local-data/openclaw.test.json) as a sandbox copy.
+
 ## Safety Guarantees
 
 - Invalid JSON is rejected before any write
@@ -74,6 +82,21 @@ Run the suite with:
 ```bash
 npm test
 ```
+
+Run the full local regression pass, including a smoke test that boots the app against a temporary sandbox config and exercises the save flow:
+
+```bash
+npm run test:regression
+```
+
+## CI/CD
+
+GitHub Actions now runs a full regression workflow on every push and pull request.
+
+- `Regression` runs unit tests plus an end-to-end smoke regression on Node 22 and 24
+- `Delivery` packages a release artifact automatically after a successful `main` regression run
+
+To make this strict in GitHub, set branch protection on `main` and require the `Regression` workflow to pass before merge.
 
 ## Roadmap
 
