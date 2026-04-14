@@ -1,0 +1,11 @@
+{
+  "name": "openclaw-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local dashboard for OpenClaw model orchestration",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test"
+  }
+}

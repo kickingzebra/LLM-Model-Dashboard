@@ -1,0 +1,71 @@
+{
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 18789,
+    "authToken": "super-secret-auth-token"
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "provider": "ollama",
+        "primary": "llama3.2:3b"
+      },
+      "models": {
+        "primary": {
+          "provider": "ollama",
+          "model": "llama3.2:3b"
+        },
+        "chat": {
+          "provider": "ollama",
+          "model": "llama3.2:3b"
+        },
+        "fallback": {
+          "provider": "ollama",
+          "model": "llama3.1:8b"
+        }
+      },
+      "routing": {
+        "provider": "ollama",
+        "primaryModel": "llama3.2:3b"
+      },
+      "toolProfile": "minimal"
+    }
+  },
+  "models": {
+    "providers": {
+      "ollama": {
+        "baseURL": "http://127.0.0.1:11434",
+        "models": {
+          "llama3.2:3b": {
+            "contextWindow": 8192,
+            "compat": {
+              "supportsTools": true
+            },
+            "notes": "fast"
+          },
+          "qwen3:8b": {
+            "contextWindow": 32768,
+            "compat": {
+              "supportsTools": true
+            },
+            "notes": "agent"
+          },
+          "llama3.1:8b": {
+            "contextWindow": 32768,
+            "compat": {
+              "supportsTools": true
+            },
+            "notes": "fallback"
+          }
+        }
+      }
+    }
+  },
+  "integrations": {
+    "telegram": {
+      "enabled": true,
+      "botToken": "123456:telegram-secret",
+      "channelId": "-10012345"
+    }
+  }
+}
