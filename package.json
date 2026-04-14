@@ -6,11 +6,11 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/index.js",
-    "start:test-config": "OPENCLAW_CONFIG_PATH=./local-data/openclaw.test.json OPENCLAW_RESET_SOURCE_PATH=./local-data/openclaw.test.seed.json OPENCLAW_AUDIT_LOG_PATH=./local-data/model-history.log.json OPENCLAW_MODEL_PROBE_SCRIPT_PATH=../scripts/ollama_tool_probe.sh OPENCLAW_PROBE_RESULTS_PATH=./local-data/model-probe-results.json node src/index.js",
+    "start:test-config": "OPENCLAW_CONFIG_PATH=./local-data/openclaw.test.json OPENCLAW_RESET_SOURCE_PATH=./local-data/openclaw.test.seed.json OPENCLAW_AUDIT_LOG_PATH=./local-data/model-history.log.json OPENCLAW_MODEL_PROBE_SCRIPT_PATH=../scripts/ollama_tool_probe.sh OPENCLAW_PROBE_RESULTS_PATH=./local-data/model-probe-results.json OPENCLAW_TEST_REPORT_PATH=./local-data/test-regression-report.json node src/index.js",
     "test": "node --test",
     "test:unit": "node --test",
     "test:smoke": "node scripts/run-regression.js",
-    "test:regression": "npm run test:unit && npm run test:smoke",
+    "test:regression": "node scripts/run-regression-suite.js",
     "ci": "npm run test:regression"
   }
 }

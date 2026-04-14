@@ -13,6 +13,7 @@ async function withApp(options = {}) {
   const resetSourcePath = path.join(tempDir, 'openclaw.seed.json');
   const auditLogPath = path.join(tempDir, 'model-history.log.json');
   const probeResultsPath = path.join(tempDir, 'model-probe-results.json');
+  const testReportPath = path.join(tempDir, 'test-report.json');
   await fs.copyFile(fixturePath, configPath);
   await fs.copyFile(fixturePath, resetSourcePath);
 
@@ -21,11 +22,12 @@ async function withApp(options = {}) {
     resetSourcePath,
     auditLogPath,
     probeResultsPath,
+    testReportPath,
     now: () => '20260414T111500',
     ...options
   });
 
-  return { app, configPath, resetSourcePath, auditLogPath, probeResultsPath };
+  return { app, configPath, resetSourcePath, auditLogPath, probeResultsPath, testReportPath };
 }
 
 test('dashboard state endpoint masks secrets and returns model details', async () => {
@@ -56,6 +58,7 @@ test('dashboard state endpoint masks secrets and returns model details', async (
   assert.deepEqual(payload.installedModels, ['qwen3:8b', 'llama3.2:3b']);
   assert.deepEqual(payload.history, []);
   assert.deepEqual(payload.probeResults, []);
+  assert.equal(payload.testStatus.lastRunAt, null);
 });
 
 test('saving a model switch updates config and returns success feedback', async () => {
@@ -198,4 +201,41 @@ test('dashboard state returns recent model history entries', async () => {
   assert.equal(payload.history.length, 1);
   assert.equal(payload.history[0].action, 'savePrimaryModel');
   assert.equal(payload.history[0].nextPrimaryModel, 'qwen3:8b');
+});
+
+test('dashboard state returns the latest regression test summary when present', async () => {
+  const { app, testReportPath } = await withApp();
+  await fs.writeFile(
+    testReportPath,
+    `${JSON.stringify({
+      lastRunAt: '2026-04-14T17:30:00Z',
+      overallStatus: 'passed',
+      suiteCount: 2,
+      passedCount: 21,
+      failedCount: 0,
+      suites: [
+        { name: 'Unit', status: 'passed' },
+        { name: 'Smoke', status: 'passed' }
+      ]
+    }, null, 2)}\n`,
+    'utf8'
+  );
+
+  const response = await app.inject({ url: '/api/state' });
+  const payload = response.json();
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(payload.testStatus.overallStatus, 'passed');
+  assert.equal(payload.testStatus.passedCount, 21);
+  assert.equal(payload.testStatus.suites[1].name, 'Smoke');
+});
+
+test('dashboard page includes a TDD test status section', async () => {
+  const { app } = await withApp();
+
+  const response = await app.inject({ url: '/' });
+
+  assert.equal(response.statusCode, 200);
+  assert.match(response.body, /TDD Test Status/);
+  assert.match(response.body, /Documented Test Matrix/);
 });

@@ -9,6 +9,7 @@ Editing `~/.openclaw/openclaw.json` by hand is slow and risky when you are switc
 This dashboard gives you a safer local control panel for:
 
 - changing the active primary model
+- keeping a separate chat model when you only want to change the tool/agent model
 - validating JSON before save
 - creating an automatic backup before every write
 - checking OpenClaw and Ollama health
@@ -19,7 +20,7 @@ This dashboard gives you a safer local control panel for:
 - Read the OpenClaw config from disk
 - Show the current primary model and configured Ollama model catalog
 - Show installed Ollama models from `http://127.0.0.1:11434/api/tags`
-- Switch the primary model safely
+- Switch the primary model safely without clobbering a dedicated chat model
 - Add an installed model to `models.providers.ollama.models` if it is missing
 - Validate JSON before writing
 - Create a timestamped backup before every write
@@ -58,6 +59,39 @@ That uses [local-data/openclaw.test.json](/Users/ziabasit/Documents/New project/
 The reset button restores that file from [local-data/openclaw.test.seed.json](/Users/ziabasit/Documents/New project/openclaw-dashboard/local-data/openclaw.test.seed.json).
 Recent sandbox model changes are logged to `local-data/model-history.log.json`.
 Direct Ollama probe results are logged to `local-data/model-probe-results.json`.
+
+## GEEKOM Deploy
+
+On the GEEKOM machine, clone the repo and run:
+
+```bash
+git clone https://github.com/kickingzebra/LLM-Model-Dashboard.git
+cd LLM-Model-Dashboard
+chmod +x scripts/deploy-geekom.sh
+./scripts/deploy-geekom.sh
+```
+
+That deploy helper will:
+
+- verify the live OpenClaw config exists
+- create `/home/zia-basit/.openclaw/openclaw.seed.json` if it is missing
+- run `npm run test:regression`
+- write a user-level systemd env file
+- install a `systemd --user` service
+- enable and restart the dashboard service
+
+Useful GEEKOM commands:
+
+```bash
+systemctl --user status openclaw-dashboard
+systemctl --user restart openclaw-dashboard
+journalctl --user -u openclaw-dashboard -n 200 --no-pager
+```
+
+The included templates are:
+
+- `systemd/openclaw-dashboard.service`
+- `systemd/openclaw-dashboard.env.example`
 
 ## Safety Guarantees
 

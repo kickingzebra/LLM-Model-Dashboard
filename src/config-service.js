@@ -28,7 +28,6 @@ function validateConfigText(text) {
 function switchPrimaryModel(config, options) {
   const { modelId, addToCatalog = false, catalogEntry = null } = options;
   const catalog = getOllamaCatalog(config);
-  const previousPrimary = config?.agents?.defaults?.model?.primary || null;
 
   if (!catalog[modelId]) {
     if (!addToCatalog || !catalogEntry) {
@@ -46,8 +45,6 @@ function switchPrimaryModel(config, options) {
     config.agents.defaults = {};
   }
 
-  syncPrimaryModelReferences(config.agents.defaults, previousPrimary, modelId);
-
   config.agents.defaults.model = {
     ...config.agents.defaults.model,
     provider: 'ollama',
@@ -64,40 +61,17 @@ function switchPrimaryModel(config, options) {
     model: modelId
   };
 
+  if (!config.agents.defaults.routing || typeof config.agents.defaults.routing !== 'object') {
+    config.agents.defaults.routing = {};
+  }
+
+  config.agents.defaults.routing = {
+    ...config.agents.defaults.routing,
+    provider: 'ollama',
+    primaryModel: modelId
+  };
+
   return config;
-}
-
-function syncPrimaryModelReferences(value, previousPrimary, nextPrimary) {
-  if (!value || typeof value !== 'object') {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      syncPrimaryModelReferences(item, previousPrimary, nextPrimary);
-    }
-
-    return value;
-  }
-
-  const isOllamaScoped = value.provider === 'ollama';
-  if (isOllamaScoped && value.model === previousPrimary) {
-    value.model = nextPrimary;
-  }
-
-  if (isOllamaScoped && value.primary === previousPrimary) {
-    value.primary = nextPrimary;
-  }
-
-  if (isOllamaScoped && value.primaryModel === previousPrimary) {
-    value.primaryModel = nextPrimary;
-  }
-
-  for (const nested of Object.values(value)) {
-    syncPrimaryModelReferences(nested, previousPrimary, nextPrimary);
-  }
-
-  return value;
 }
 
 function maskValue(value) {

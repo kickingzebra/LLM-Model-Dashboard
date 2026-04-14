@@ -10,6 +10,7 @@ function createApp(options) {
     auditLogPath,
     modelProbeScriptPath,
     probeResultsPath,
+    testReportPath,
     now,
     fetchImpl,
     runCommand,
@@ -22,6 +23,7 @@ function createApp(options) {
     runCommand,
     modelProbeScriptPath,
     probeResultsPath,
+    testReportPath,
     now
   });
 
@@ -32,11 +34,12 @@ function createApp(options) {
       }
 
       if (request.method === 'GET' && request.url === '/api/state') {
-        const [config, health, history, probeResults] = await Promise.all([
+        const [config, health, history, probeResults, testStatus] = await Promise.all([
           configService.getMaskedConfig(),
           systemService.checkHealth(),
           configService.getHistory(),
-          systemService.getProbeResults()
+          systemService.getProbeResults(),
+          systemService.getTestStatus()
         ]);
 
         return sendJson(response, 200, {
@@ -46,7 +49,8 @@ function createApp(options) {
           health,
           summary: summarizeConfig(config),
           history,
-          probeResults
+          probeResults,
+          testStatus
         });
       }
 
@@ -405,9 +409,11 @@ function renderDashboardHtml() {
     .card-summary { grid-column: span 5; }
     .card-history { grid-column: span 12; }
     .card-probe { grid-column: span 12; }
+    .card-tests { grid-column: span 12; }
+    .card-matrix { grid-column: span 12; }
     @media (max-width: 1024px) {
       .card-primary, .card-health, .card-recovery,
-      .card-validation, .card-summary, .card-history, .card-probe {
+      .card-validation, .card-summary, .card-history, .card-probe, .card-tests, .card-matrix {
         grid-column: span 12;
       }
     }
@@ -589,6 +595,62 @@ function renderDashboardHtml() {
       color: #d9f7f0;
       line-height: 1.5;
     }
+    .matrix-wrap {
+      margin-top: 14px;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      overflow: hidden;
+      background: rgba(8, 14, 23, 0.72);
+    }
+    .matrix-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+    }
+    .matrix-table th,
+    .matrix-table td {
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(159, 176, 195, 0.12);
+      vertical-align: top;
+      text-align: left;
+    }
+    .matrix-table th {
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--muted);
+      font-size: 0.78rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .matrix-table tr:last-child td {
+      border-bottom: none;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 5px 9px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      white-space: nowrap;
+    }
+    .chip.pass {
+      background: rgba(79, 209, 165, 0.14);
+      color: var(--ok);
+    }
+    .chip.fail {
+      background: rgba(248, 113, 113, 0.14);
+      color: var(--error);
+    }
+    .chip.pending {
+      background: rgba(247, 178, 103, 0.14);
+      color: var(--accent-soft);
+    }
+    .matrix-note {
+      margin-top: 14px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
     code { background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 6px; }
   </style>
 </head>
@@ -628,6 +690,10 @@ function renderDashboardHtml() {
       <article class="metric">
         <p class="metric-label">Latest Probe</p>
         <p class="metric-value small" id="latest-probe">No probe results yet.</p>
+      </article>
+      <article class="metric">
+        <p class="metric-label">Regression Status</p>
+        <p class="metric-value small" id="test-overall-status">Not run yet.</p>
       </article>
       <article class="metric">
         <p class="metric-label">Latest Backup</p>
@@ -719,6 +785,37 @@ function renderDashboardHtml() {
         <p class="meta">After each model change, the dashboard can run the documented direct Ollama probe from <code>ollama_tool_probe.sh</code>. This covers plain chat, tools payload acceptance, and structured tool-call return. It is not the full OpenClaw end-to-end confirmation pass.</p>
         <ul id="probe-results-list" class="list"></ul>
       </article>
+      <article class="card card-tests">
+        <div class="card-head">
+          <h2>TDD Test Status</h2>
+          <span class="card-kicker">Regression dashboard</span>
+        </div>
+        <p class="meta">This panel shows the latest recorded regression run from the local/CI suite so you can see whether the test-driven workflow is still green before making more changes.</p>
+        <div id="test-summary-list" class="list"></div>
+      </article>
+      <article class="card card-matrix">
+        <div class="card-head">
+          <h2>Documented Test Matrix</h2>
+          <span class="card-kicker">Model capability plan</span>
+        </div>
+        <p class="meta">This mirrors the documented approach from <code>OPENCLAW_MODEL_TOOL_TEST_MATRIX_2026-04-13.md</code>. The dashboard can fill in the direct Ollama capability checks from the probe script. The broader OpenClaw agent confirmation pass is still a second-stage check.</p>
+        <div class="matrix-wrap">
+          <table class="matrix-table">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>Chat OK</th>
+                <th>Tools Payload Accepted</th>
+                <th>Structured Tool Call Returned</th>
+                <th>OpenClaw Agent Pass</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody id="matrix-body"></tbody>
+          </table>
+        </div>
+        <p class="matrix-note">Direct probe automation covers plain chat, tools payload acceptance, and structured tool-call return via <code>ollama_tool_probe.sh</code>. Telegram path, TUI path, session behavior, and real OpenClaw tool execution are not yet automated in this dashboard.</p>
+      </article>
     </section>
   </main>
   <script>
@@ -745,11 +842,15 @@ function renderDashboardHtml() {
       document.getElementById('installed-count').textContent = String(payload.installedModels.length);
       const latestBackupPath = payload.history[0]?.backupPath || 'No backups yet.';
       const latestProbe = payload.probeResults[0];
+      const testStatus = payload.testStatus;
       document.getElementById('latest-backup').textContent = latestBackupPath;
       document.getElementById('latest-backup-path').textContent = latestBackupPath;
       document.getElementById('latest-probe').textContent = latestProbe
         ? latestProbe.model + ' | ' + latestProbe.toolsOutcome
         : 'No probe results yet.';
+      document.getElementById('test-overall-status').textContent = testStatus.lastRunAt
+        ? testStatus.overallStatus + ' | ' + testStatus.passedCount + ' passed'
+        : 'Not run yet.';
       document.getElementById('validation-input').value = JSON.stringify(payload.config, null, 2);
       document.getElementById('config-summary').innerHTML = [
         '<li><strong>Configured models:</strong> ' + summary.availableConfiguredModels.join(', ') + '</li>',
@@ -780,7 +881,61 @@ function renderDashboardHtml() {
             '</li>'
           ).join('')
         : '<li class="empty">No probe results logged yet.</li>';
+      document.getElementById('test-summary-list').innerHTML = testStatus.lastRunAt
+        ? [
+            '<li><strong>Last run:</strong> ' + testStatus.lastRunAt + '</li>',
+            '<li><strong>Overall status:</strong> ' + testStatus.overallStatus + '</li>',
+            '<li><strong>Suites:</strong> ' + testStatus.suiteCount + ' | <strong>Passed:</strong> ' + testStatus.passedCount + ' | <strong>Failed:</strong> ' + testStatus.failedCount + '</li>',
+            '<li><strong>Suite detail:</strong> ' + testStatus.suites.map((suite) => suite.name + ' (' + suite.status + ')').join(', ') + '</li>'
+          ].join('')
+        : '<li class="empty">No regression report has been recorded yet. Run <code>npm run test:regression</code> to populate this panel.</li>';
+      document.getElementById('matrix-body').innerHTML = buildMatrixRows(summary.availableConfiguredModels, payload.probeResults);
       renderHealth(payload.health);
+    }
+
+    function buildMatrixRows(models, probeResults) {
+      const probeByModel = new Map(probeResults.map((entry) => [entry.model, entry]));
+
+      return models.map((model) => {
+        const probe = probeByModel.get(model);
+        const chatOk = probe ? yesNoChip(probe.chatOk === 'yes') : pendingChip('Pending');
+        const toolsAccepted = probe ? yesNoChip(probe.toolsHttp === '200') : pendingChip('Pending');
+        const structuredCall = probe
+          ? yesNoChip(probe.toolsOutcome === 'tool_calls_returned')
+          : pendingChip('Pending');
+        const openClawPass = pendingChip('Manual');
+        const notes = probe
+          ? escapeHtml(probe.toolsSummary || probe.chatSummary || 'Probe recorded')
+          : 'Direct Ollama probe not run yet';
+
+        return '<tr>' +
+          '<td><strong>' + escapeHtml(model) + '</strong></td>' +
+          '<td>' + chatOk + '</td>' +
+          '<td>' + toolsAccepted + '</td>' +
+          '<td>' + structuredCall + '</td>' +
+          '<td>' + openClawPass + '</td>' +
+          '<td>' + notes + '</td>' +
+        '</tr>';
+      }).join('');
+    }
+
+    function yesNoChip(value) {
+      return value
+        ? '<span class="chip pass">Yes</span>'
+        : '<span class="chip fail">No</span>';
+    }
+
+    function pendingChip(label) {
+      return '<span class="chip pending">' + escapeHtml(label) + '</span>';
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
     }
 
     function renderHealth(health) {

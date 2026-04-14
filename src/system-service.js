@@ -6,6 +6,7 @@ function createSystemService({
   runCommand = defaultRunCommand,
   modelProbeScriptPath = null,
   probeResultsPath = null,
+  testReportPath = null,
   now = defaultTimestamp,
   openclawHealthUrl = 'http://127.0.0.1:18789/health',
   ollamaTagsUrl = 'http://127.0.0.1:11434/api/tags'
@@ -66,6 +67,30 @@ function createSystemService({
         throw error;
       }
     },
+    async getTestStatus() {
+      if (!testReportPath) {
+        return emptyTestStatus();
+      }
+
+      try {
+        const text = await fs.readFile(testReportPath, 'utf8');
+        const parsed = JSON.parse(text);
+        return {
+          lastRunAt: parsed.lastRunAt || null,
+          overallStatus: parsed.overallStatus || 'unknown',
+          suiteCount: parsed.suiteCount || 0,
+          passedCount: parsed.passedCount || 0,
+          failedCount: parsed.failedCount || 0,
+          suites: Array.isArray(parsed.suites) ? parsed.suites : []
+        };
+      } catch (error) {
+        if (error.code === 'ENOENT') {
+          return emptyTestStatus();
+        }
+
+        throw error;
+      }
+    },
     async runModelProbe(modelId) {
       if (!modelProbeScriptPath) {
         return {
@@ -107,6 +132,17 @@ function createSystemService({
         entries
       };
     }
+  };
+}
+
+function emptyTestStatus() {
+  return {
+    lastRunAt: null,
+    overallStatus: 'not_run',
+    suiteCount: 0,
+    passedCount: 0,
+    failedCount: 0,
+    suites: []
   };
 }
 

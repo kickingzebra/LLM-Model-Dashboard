@@ -29,7 +29,7 @@ test('loads and parses config from disk', async () => {
   assert.equal(result.models.providers.ollama.models['qwen3:8b'].compat.supportsTools, true);
 });
 
-test('switching the primary model updates defaults and active models map', () => {
+test('switching the primary model updates primary routing without overwriting chat', () => {
   const fixture = require('./fixtures/openclaw.valid.json');
 
   const updated = switchPrimaryModel(structuredClone(fixture), {
@@ -38,7 +38,7 @@ test('switching the primary model updates defaults and active models map', () =>
 
   assert.equal(updated.agents.defaults.model.primary, 'qwen3:8b');
   assert.equal(updated.agents.defaults.models.primary.model, 'qwen3:8b');
-  assert.equal(updated.agents.defaults.models.chat.model, 'qwen3:8b');
+  assert.equal(updated.agents.defaults.models.chat.model, 'llama3.2:3b');
   assert.equal(updated.agents.defaults.routing.primaryModel, 'qwen3:8b');
   assert.equal(updated.agents.defaults.models.fallback.model, 'llama3.1:8b');
 });
@@ -92,7 +92,7 @@ test('saving creates a backup before writing the updated config', async () => {
   assert.equal(result.backup.path.endsWith('openclaw.json.bak.20260414T103000'), true);
   assert.equal(written.agents.defaults.model.primary, 'qwen3:8b');
   assert.equal(written.agents.defaults.models.primary.model, 'qwen3:8b');
-  assert.equal(written.agents.defaults.models.chat.model, 'qwen3:8b');
+  assert.equal(written.agents.defaults.models.chat.model, 'llama3.2:3b');
   assert.equal(written.agents.defaults.routing.primaryModel, 'qwen3:8b');
   assert.equal(written.agents.defaults.models.fallback.model, 'llama3.1:8b');
 });

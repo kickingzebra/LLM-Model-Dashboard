@@ -9,6 +9,7 @@ const resetSourcePath = process.env.OPENCLAW_RESET_SOURCE_PATH || null;
 const auditLogPath = process.env.OPENCLAW_AUDIT_LOG_PATH || null;
 const modelProbeScriptPath = process.env.OPENCLAW_MODEL_PROBE_SCRIPT_PATH || null;
 const probeResultsPath = process.env.OPENCLAW_PROBE_RESULTS_PATH || null;
+const testReportPath = process.env.OPENCLAW_TEST_REPORT_PATH || null;
 
 const port = Number(process.env.PORT || 3024);
 
@@ -18,6 +19,7 @@ const app = createApp({
   auditLogPath: auditLogPath ? path.resolve(auditLogPath) : null,
   modelProbeScriptPath: modelProbeScriptPath ? path.resolve(modelProbeScriptPath) : null,
   probeResultsPath: probeResultsPath ? path.resolve(probeResultsPath) : null,
+  testReportPath: testReportPath ? path.resolve(testReportPath) : null,
   port
 });
 
@@ -37,6 +39,9 @@ app
     }
     if (probeResultsPath) {
       console.log(`Using probe results path: ${probeResultsPath}`);
+    }
+    if (testReportPath) {
+      console.log(`Using test report path: ${testReportPath}`);
     }
   })
   .catch((error) => {
