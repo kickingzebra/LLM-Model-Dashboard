@@ -10,6 +10,7 @@ const auditLogPath = process.env.OPENCLAW_AUDIT_LOG_PATH || null;
 const modelProbeScriptPath = process.env.OPENCLAW_MODEL_PROBE_SCRIPT_PATH || null;
 const probeResultsPath = process.env.OPENCLAW_PROBE_RESULTS_PATH || null;
 const testReportPath = process.env.OPENCLAW_TEST_REPORT_PATH || null;
+const host = process.env.HOST || '127.0.0.1';
 
 const port = Number(process.env.PORT || 3024);
 
@@ -20,13 +21,15 @@ const app = createApp({
   modelProbeScriptPath: modelProbeScriptPath ? path.resolve(modelProbeScriptPath) : null,
   probeResultsPath: probeResultsPath ? path.resolve(probeResultsPath) : null,
   testReportPath: testReportPath ? path.resolve(testReportPath) : null,
+  host,
   port
 });
 
 app
-  .start(port)
+  .start(port, host)
   .then(() => {
     console.log(`OpenClaw dashboard running at ${app.baseUrl}`);
+    console.log(`Using host bind: ${host}`);
     console.log(`Using config path: ${configPath}`);
     if (resetSourcePath) {
       console.log(`Using reset seed path: ${resetSourcePath}`);

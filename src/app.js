@@ -14,6 +14,7 @@ function createApp(options) {
     now,
     fetchImpl,
     runCommand,
+    host = '127.0.0.1',
     port = 3000
   } = options;
 
@@ -159,10 +160,14 @@ function createApp(options) {
         }
       };
     },
-    async start(startPort = port) {
-      await new Promise((resolve) => server.listen(startPort, '127.0.0.1', resolve));
+    async start(startPort = port, startHost = host) {
+      await new Promise((resolve) => server.listen(startPort, startHost, resolve));
       const address = server.address();
-      this.baseUrl = `http://127.0.0.1:${address.port}`;
+      const resolvedHost =
+        typeof address === 'object' && address.address
+          ? (address.address === '::' ? startHost : address.address)
+          : startHost;
+      this.baseUrl = `http://${resolvedHost}:${typeof address === 'object' ? address.port : startPort}`;
     },
     async stop() {
       await new Promise((resolve, reject) => {

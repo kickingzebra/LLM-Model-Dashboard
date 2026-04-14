@@ -88,6 +88,26 @@ systemctl --user restart openclaw-dashboard
 journalctl --user -u openclaw-dashboard -n 200 --no-pager
 ```
 
+By default, the deploy script sets:
+
+```bash
+HOST=0.0.0.0
+```
+
+That makes the dashboard reachable from another machine on your LAN, such as your MacBook, using the GEEKOM IP:
+
+```text
+http://192.168.86.30:3024
+```
+
+If you want the dashboard to be GEEKOM-local only, set:
+
+```bash
+HOST=127.0.0.1
+```
+
+in `/home/zia-basit/.config/systemd/user/openclaw-dashboard.env`, then restart the service.
+
 The included templates are:
 
 - `systemd/openclaw-dashboard.service`

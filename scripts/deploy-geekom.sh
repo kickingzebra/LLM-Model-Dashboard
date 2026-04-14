@@ -7,6 +7,7 @@ OPENCLAW_DIR="${OPENCLAW_DIR:-$HOME/.openclaw}"
 SERVICE_NAME="${SERVICE_NAME:-openclaw-dashboard}"
 PROBE_SCRIPT_PATH="${PROBE_SCRIPT_PATH:-$HOME/scripts/ollama_tool_probe.sh}"
 PORT="${PORT:-3024}"
+HOST="${HOST:-0.0.0.0}"
 
 CONFIG_PATH="$OPENCLAW_DIR/openclaw.json"
 SEED_PATH="$OPENCLAW_DIR/openclaw.seed.json"
@@ -55,6 +56,7 @@ echo "==> Running regression suite"
 
 echo "==> Writing environment file: $ENV_FILE"
 cat >"$ENV_FILE" <<EOF
+HOST=$HOST
 PORT=$PORT
 OPENCLAW_CONFIG_PATH=$CONFIG_PATH
 OPENCLAW_RESET_SOURCE_PATH=$SEED_PATH
@@ -82,5 +84,8 @@ systemctl --user --no-pager --full status "$SERVICE_NAME" || true
 
 echo
 echo "Dashboard should now be available at: http://127.0.0.1:$PORT"
+if [[ "$HOST" == "0.0.0.0" ]]; then
+  echo "LAN access should be available on the GEEKOM machine IP as well."
+fi
 echo "Environment file: $ENV_FILE"
 echo "Service file: $SERVICE_FILE"
