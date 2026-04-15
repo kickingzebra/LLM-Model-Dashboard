@@ -109,7 +109,9 @@ test('dashboard state endpoint masks secrets and returns model details', async (
 
 test('mode switch endpoint swaps between sandbox and live config views', async () => {
   const liveConfig = JSON.parse(await fs.readFile(path.join(__dirname, 'fixtures', 'openclaw.valid.json'), 'utf8'));
-  liveConfig.agents.defaults.model.primary = 'qwen3:8b';
+  liveConfig.agents.defaults.model = 'ollama/qwen3:8b';
+  liveConfig.agents.defaults.models.primary = 'ollama/qwen3:8b';
+  delete liveConfig.agents.defaults.routing;
 
   const { app } = await withApp({ liveConfig });
 

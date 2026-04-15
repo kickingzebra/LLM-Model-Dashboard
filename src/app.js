@@ -331,9 +331,13 @@ function summarizeConfig(config, options = {}) {
     currentMode === 'live'
       ? (liveWritesEnabled ? 'live-enabled' : 'live-read-only')
       : 'sandbox-only';
+  const primaryModel = extractPrimaryModelId(defaults.model) ||
+    extractPrimaryModelId(defaults.models?.primary) ||
+    defaults.routing?.primaryModel ||
+    null;
 
   return {
-    primaryModel: defaults?.model?.primary || null,
+    primaryModel,
     activeModels: defaults?.models || {},
     availableConfiguredModels: listConfiguredModelIds(config),
     toolCapableConfiguredModels: listToolCapableConfiguredModels(config),
@@ -346,6 +350,30 @@ function summarizeConfig(config, options = {}) {
     liveAvailable,
     liveWritesEnabled
   };
+}
+
+function extractPrimaryModelId(value) {
+  if (typeof value === 'string') {
+    return value.includes('/') ? value.split('/').slice(1).join('/') : value;
+  }
+
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  if (typeof value.primary === 'string') {
+    return extractPrimaryModelId(value.primary);
+  }
+
+  if (typeof value.model === 'string') {
+    return extractPrimaryModelId(value.model);
+  }
+
+  if (typeof value.id === 'string') {
+    return extractPrimaryModelId(value.id);
+  }
+
+  return null;
 }
 
 function determineInitialMode({ initialConfigPath, sandboxConfigPath, liveConfigPath }) {
