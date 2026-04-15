@@ -18,6 +18,7 @@ function createApp(options) {
     auditLogPath,
     modelProbeScriptPath,
     probeResultsPath,
+    modelLiveLogPath,
     testReportPath,
     now,
     fetchImpl,
@@ -32,6 +33,7 @@ function createApp(options) {
     runCommand,
     modelProbeScriptPath,
     probeResultsPath,
+    modelLiveLogPath,
     testReportPath,
     now
   });
@@ -76,11 +78,12 @@ function createApp(options) {
       if (request.method === 'GET' && request.url === '/api/state') {
         const configService = getConfigService();
         const modePaths = getModePaths();
-        const [config, health, history, probeResults, testStatus] = await Promise.all([
+        const [config, health, history, probeResults, modelLiveLog, testStatus] = await Promise.all([
           configService.getMaskedConfig(),
           systemService.checkHealth(),
           configService.getHistory(),
           systemService.getProbeResults(),
+          systemService.getModelLiveLog(),
           systemService.getTestStatus()
         ]);
 
@@ -97,6 +100,7 @@ function createApp(options) {
           }),
           history,
           probeResults,
+          modelLiveLog,
           testStatus
         });
       }
@@ -497,18 +501,22 @@ function renderDashboardHtml() {
     }
     .overview {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 14px;
-      margin-bottom: 18px;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
     }
     .metric {
-      padding: 18px;
+      padding: 16px 16px 18px;
       border: 1px solid var(--line);
-      border-radius: 22px;
+      border-radius: 20px;
       background: linear-gradient(180deg, rgba(13, 23, 36, 0.94), rgba(10, 18, 29, 0.82));
       box-shadow: var(--shadow);
       position: relative;
       overflow: hidden;
+      min-height: 108px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
     }
     .metric::before {
       content: "";
@@ -534,13 +542,14 @@ function renderDashboardHtml() {
       word-break: break-word;
     }
     .metric-value.small {
-      font-size: 0.94rem;
+      font-size: 0.9rem;
       color: #d8e1ea;
     }
     .grid {
       display: grid;
       grid-template-columns: repeat(12, minmax(0, 1fr));
       gap: 18px;
+      align-items: start;
     }
     .card {
       background: var(--panel);
@@ -558,18 +567,20 @@ function renderDashboardHtml() {
       height: 1px;
       background: linear-gradient(90deg, rgba(239, 131, 84, 0.44), transparent 72%);
     }
-    .card-primary { grid-column: span 5; }
+    .card-mode { grid-column: span 4; }
+    .card-primary { grid-column: span 4; }
     .card-health { grid-column: span 4; }
-    .card-recovery { grid-column: span 3; }
-    .card-validation { grid-column: span 7; }
-    .card-summary { grid-column: span 5; }
-    .card-history { grid-column: span 12; }
-    .card-probe { grid-column: span 12; }
-    .card-tests { grid-column: span 12; }
+    .card-recovery { grid-column: span 4; }
+    .card-validation { grid-column: span 4; }
+    .card-summary { grid-column: span 4; }
+    .card-history { grid-column: span 6; }
+    .card-live-log { grid-column: span 12; }
+    .card-probe { grid-column: span 6; }
+    .card-tests { grid-column: span 6; }
     .card-matrix { grid-column: span 12; }
     @media (max-width: 1024px) {
-      .card-primary, .card-health, .card-recovery,
-      .card-validation, .card-summary, .card-history, .card-probe, .card-tests, .card-matrix {
+      .card-mode, .card-primary, .card-health, .card-recovery,
+      .card-validation, .card-summary, .card-history, .card-live-log, .card-probe, .card-tests, .card-matrix {
         grid-column: span 12;
       }
     }
@@ -596,6 +607,11 @@ function renderDashboardHtml() {
       font-size: 0.75rem;
       letter-spacing: 0.08em;
       text-transform: uppercase;
+    }
+    .card-mode {
+      background:
+        linear-gradient(180deg, rgba(18, 31, 46, 0.98), rgba(13, 24, 37, 0.92)),
+        radial-gradient(circle at top right, rgba(109, 211, 199, 0.1), transparent 45%);
     }
     label, button, select, textarea { font: inherit; }
     select, textarea {
@@ -631,6 +647,9 @@ function renderDashboardHtml() {
     }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
     .actions button { margin: 0; }
+    .mode-actions button {
+      flex: 1 1 150px;
+    }
     .status {
       margin-top: 14px;
       min-height: 24px;
@@ -705,6 +724,37 @@ function renderDashboardHtml() {
       word-break: break-word;
       font-size: 0.92rem;
       line-height: 1.5;
+    }
+    .mode-shell {
+      display: grid;
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .mode-banner {
+      padding: 14px 16px;
+      border-radius: 18px;
+      border: 1px solid rgba(109, 211, 199, 0.18);
+      background: linear-gradient(135deg, rgba(109, 211, 199, 0.12), rgba(255, 255, 255, 0.03));
+    }
+    .mode-banner strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 0.82rem;
+      color: var(--accent-cool);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .mode-banner code {
+      display: block;
+      margin-top: 8px;
+      white-space: normal;
+      word-break: break-word;
+      line-height: 1.5;
+    }
+    .mode-note {
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.6;
     }
     .list {
       list-style: none;
@@ -807,6 +857,28 @@ function renderDashboardHtml() {
       color: var(--muted);
       line-height: 1.6;
     }
+    .log-path {
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.5;
+      word-break: break-word;
+    }
+    .log-viewer {
+      margin-top: 14px;
+      padding: 16px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(6, 12, 20, 0.88);
+      color: #e5eef7;
+      font-family: "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 0.88rem;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 520px;
+      overflow: auto;
+    }
     code { background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 6px; }
   </style>
 </head>
@@ -867,11 +939,15 @@ function renderDashboardHtml() {
           <span class="card-kicker">Sandbox vs Live</span>
         </div>
         <p class="meta">Switch the dashboard target between the sandbox config and the live OpenClaw config. Live mode stays read-only until live writes are explicitly enabled.</p>
-        <div id="mode-summary" class="backup-path">
-          <strong>Current Mode</strong>
-          <code id="mode-summary-text">Loading...</code>
+        <div class="mode-shell">
+          <div id="mode-summary" class="mode-banner">
+            <strong>Current Target</strong>
+            <div id="mode-summary-text">Loading...</div>
+            <code id="mode-path-text">Loading...</code>
+          </div>
+          <div class="mode-note" id="mode-note-text">Sandbox is the default safe editing surface. Live mode is for inspection first, then deliberate writes later.</div>
         </div>
-        <div class="actions">
+        <div class="actions mode-actions">
           <button id="mode-sandbox-button" class="ghost">Use Sandbox</button>
           <button id="mode-live-button" class="secondary">Use Live</button>
         </div>
@@ -953,6 +1029,15 @@ function renderDashboardHtml() {
         <p class="meta">Recent sandbox model changes, resets, and the backup file generated for each action.</p>
         <ul id="history-list" class="list"></ul>
       </article>
+      <article class="card card-live-log">
+        <div class="card-head">
+          <h2>Live Model Log</h2>
+          <span class="card-kicker">Markdown notebook</span>
+        </div>
+        <p class="meta">This panel mirrors the human-readable Markdown log for model incidents, Telegram failures, and real workflow observations.</p>
+        <div id="live-log-path" class="log-path">No live log configured.</div>
+        <pre id="live-log-content" class="log-viewer">No live log loaded yet.</pre>
+      </article>
       <article class="card card-probe">
         <div class="card-head">
           <h2>Direct Ollama Probe</h2>
@@ -1021,10 +1106,18 @@ function renderDashboardHtml() {
       document.getElementById('installed-count').textContent = String(payload.installedModels.length);
       const latestBackupPath = payload.history[0]?.backupPath || 'No backups yet.';
       const latestProbe = payload.probeResults[0];
+      const liveLog = payload.modelLiveLog || { available: false, path: null, content: '' };
       const testStatus = payload.testStatus;
       document.getElementById('mode-badge').textContent = summary.currentMode + ' | ' + summary.writeMode;
       document.getElementById('mode-summary-text').textContent =
-        summary.currentMode + ' | ' + summary.writeMode + ' | ' + (summary.configPath || 'No config path');
+        'Mode: ' + summary.currentMode + ' | Write: ' + summary.writeMode;
+      document.getElementById('mode-path-text').textContent = summary.configPath || 'No config path';
+      document.getElementById('mode-note-text').textContent =
+        summary.currentMode === 'live'
+          ? (summary.liveWritesEnabled
+            ? 'Live mode is active and writes are enabled. Changes affect the real OpenClaw config.'
+            : 'Live mode is active in read-only form. Inspect safely before explicitly enabling live writes.')
+          : 'Sandbox mode is active. Model changes and resets affect only the sandbox config copy.';
       document.getElementById('latest-backup').textContent = latestBackupPath;
       document.getElementById('latest-backup-path').textContent = latestBackupPath;
       document.getElementById('latest-probe').textContent = latestProbe
@@ -1054,6 +1147,12 @@ function renderDashboardHtml() {
             '</li>'
           ).join('')
         : '<li class="empty">No changes logged yet.</li>';
+      document.getElementById('live-log-path').innerHTML = liveLog.path
+        ? '<strong>Source:</strong> ' + escapeHtml(liveLog.path)
+        : 'No live log configured.';
+      document.getElementById('live-log-content').textContent = liveLog.available
+        ? (liveLog.content || 'Live log file is empty.')
+        : (liveLog.path ? 'Live log file not found yet.' : 'No live log configured.');
       document.getElementById('probe-results-list').innerHTML = payload.probeResults.length
         ? payload.probeResults.map((entry) =>
             '<li>' +
