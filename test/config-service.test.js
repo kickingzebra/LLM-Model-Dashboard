@@ -238,6 +238,44 @@ test('saving preserves live-style string references on disk', async () => {
   assert.equal('routing' in written.agents.defaults, false);
 });
 
+test('saving preserves live-style active model maps on disk', async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openclaw-dashboard-live-map-'));
+  const configPath = path.join(tempDir, 'openclaw.json');
+  const config = {
+    agents: {
+      defaults: {
+        model: {
+          primary: 'ollama/llama3.2:3b'
+        },
+        models: {
+          'ollama/llama3.2:3b': {}
+        },
+        workspace: '/home/zia-basit/.openclaw/workspace'
+      }
+    },
+    models: {
+      providers: {
+        ollama: {
+          models: {
+            'llama3.2:3b': { compat: { supportsTools: true } },
+            'qwen3:8b': { compat: { supportsTools: true } }
+          }
+        }
+      }
+    }
+  };
+  await fs.writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+  const service = createConfigService({ configPath, now: () => '20260415T191500' });
+
+  await service.savePrimaryModel({ modelId: 'qwen3:8b' });
+  const written = JSON.parse(await fs.readFile(configPath, 'utf8'));
+
+  assert.equal(written.agents.defaults.model.primary, 'ollama/qwen3:8b');
+  assert.deepEqual(written.agents.defaults.models, {
+    'ollama/qwen3:8b': {}
+  });
+});
+
 test('resetting the config restores the seed copy and creates a backup first', async () => {
   const { configPath, tempDir } = await createTempConfigFixture();
   const seedPath = path.join(tempDir, 'openclaw.seed.json');

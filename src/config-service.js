@@ -158,9 +158,31 @@ function updateModelReference(existingValue, modelId) {
   return existingValue;
 }
 
+function switchPrimaryModelMapKey(modelsMap, previousModelId, nextModelId) {
+  if (!modelsMap || typeof modelsMap !== 'object' || Array.isArray(modelsMap)) {
+    return;
+  }
+
+  const keys = Object.keys(modelsMap);
+  const previousProviderRef = previousModelId ? buildProviderModelRef(previousModelId) : null;
+  const nextProviderRef = buildProviderModelRef(nextModelId);
+  const matchingKey =
+    keys.find((key) => key === previousProviderRef || key === previousModelId) ||
+    (keys.length === 1 && keys[0].includes('/') ? keys[0] : null);
+
+  if (!matchingKey || matchingKey === nextProviderRef || matchingKey === nextModelId) {
+    return;
+  }
+
+  const currentValue = modelsMap[matchingKey];
+  delete modelsMap[matchingKey];
+  modelsMap[nextProviderRef] = currentValue;
+}
+
 function switchPrimaryModel(config, options) {
   const { modelId, addToCatalog = false, catalogEntry = null } = options;
   const existingCatalogEntry = getCatalogEntry(config, modelId);
+  const previousPrimaryModelId = getPrimaryModelId(config);
 
   if (!existingCatalogEntry) {
     if (!addToCatalog || !catalogEntry) {
@@ -204,6 +226,8 @@ function switchPrimaryModel(config, options) {
       provider: 'ollama',
       model: modelId
     };
+  } else {
+    switchPrimaryModelMapKey(config.agents.defaults.models, previousPrimaryModelId, modelId);
   }
 
   if (config.agents.defaults.routing && typeof config.agents.defaults.routing === 'object') {
