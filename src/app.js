@@ -1021,6 +1021,32 @@ function renderDashboardHtml() {
         <ul id="config-summary" class="list"></ul>
         <div class="summary-note">Tip: use <span class="subtle-strong">Save Model</span> to test a change, then use <span class="subtle-strong">Reset Active Config</span> to get back to the known-good seed state.</div>
       </article>
+      <article class="card card-matrix">
+        <div class="card-head">
+          <h2>Documented Test Matrix</h2>
+          <span class="card-kicker">Model capability plan</span>
+        </div>
+        <p class="meta">This mirrors the documented approach from <code>OPENCLAW_MODEL_TOOL_TEST_MATRIX_2026-04-13.md</code>. The dashboard can fill in the direct Ollama capability checks from the probe script. The broader OpenClaw agent confirmation pass is still a second-stage check.</p>
+        <div class="actions">
+          <button id="probe-candidates-button">Probe Tool-Capable Candidates</button>
+        </div>
+        <div class="matrix-wrap">
+          <table class="matrix-table">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>Chat OK</th>
+                <th>Tools Payload Accepted</th>
+                <th>Structured Tool Call Returned</th>
+                <th>OpenClaw Agent Pass</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody id="matrix-body"></tbody>
+          </table>
+        </div>
+        <p class="matrix-note">Direct probe automation covers plain chat, tools payload acceptance, and structured tool-call return via <code>ollama_tool_probe.sh</code>. Telegram path, TUI path, session behavior, and real OpenClaw tool execution are not yet automated in this dashboard.</p>
+      </article>
       <article class="card card-history">
         <div class="card-head">
           <h2>Model History</h2>
@@ -1053,32 +1079,6 @@ function renderDashboardHtml() {
         </div>
         <p class="meta">This panel shows the latest recorded regression run from the local/CI suite so you can see whether the test-driven workflow is still green before making more changes.</p>
         <div id="test-summary-list" class="list"></div>
-      </article>
-      <article class="card card-matrix">
-        <div class="card-head">
-          <h2>Documented Test Matrix</h2>
-          <span class="card-kicker">Model capability plan</span>
-        </div>
-        <p class="meta">This mirrors the documented approach from <code>OPENCLAW_MODEL_TOOL_TEST_MATRIX_2026-04-13.md</code>. The dashboard can fill in the direct Ollama capability checks from the probe script. The broader OpenClaw agent confirmation pass is still a second-stage check.</p>
-        <div class="actions">
-          <button id="probe-candidates-button">Probe Tool-Capable Candidates</button>
-        </div>
-        <div class="matrix-wrap">
-          <table class="matrix-table">
-            <thead>
-              <tr>
-                <th>Model</th>
-                <th>Chat OK</th>
-                <th>Tools Payload Accepted</th>
-                <th>Structured Tool Call Returned</th>
-                <th>OpenClaw Agent Pass</th>
-                <th>Notes</th>
-              </tr>
-            </thead>
-            <tbody id="matrix-body"></tbody>
-          </table>
-        </div>
-        <p class="matrix-note">Direct probe automation covers plain chat, tools payload acceptance, and structured tool-call return via <code>ollama_tool_probe.sh</code>. Telegram path, TUI path, session behavior, and real OpenClaw tool execution are not yet automated in this dashboard.</p>
       </article>
     </section>
   </main>
