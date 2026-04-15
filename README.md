@@ -42,7 +42,7 @@ This dashboard gives you a safer local control panel for:
 git clone https://github.com/kickingzebra/LLM-Model-Dashboard.git
 cd LLM-Model-Dashboard
 npm test
-OPENCLAW_CONFIG_PATH=/home/zia-basit/.openclaw/openclaw.json npm start
+OPENCLAW_CONFIG_PATH=/home/zia-basit/.openclaw/openclaw.sandbox.json npm start
 ```
 
 The default dashboard port is `3024`. Set `PORT` if you want a different one.
@@ -74,11 +74,18 @@ chmod +x scripts/deploy-geekom.sh
 That deploy helper will:
 
 - verify the live OpenClaw config exists
-- create `/home/zia-basit/.openclaw/openclaw.seed.json` if it is missing
+- create `/home/zia-basit/.openclaw/openclaw.sandbox.json` if it is missing
+- create `/home/zia-basit/.openclaw/openclaw.sandbox.seed.json` if it is missing
 - run `npm run test:regression`
 - write a user-level systemd env file
 - install a `systemd --user` service
 - enable and restart the dashboard service
+
+By default, the GEEKOM deployment is now sandbox-only:
+
+- writes go to `/home/zia-basit/.openclaw/openclaw.sandbox.json`
+- reset restores from `/home/zia-basit/.openclaw/openclaw.sandbox.seed.json`
+- live writes to `/home/zia-basit/.openclaw/openclaw.json` are blocked unless `OPENCLAW_ENABLE_LIVE_WRITES=true` is explicitly set
 
 Useful GEEKOM commands:
 
@@ -107,6 +114,16 @@ HOST=127.0.0.1
 ```
 
 in `/home/zia-basit/.config/systemd/user/openclaw-dashboard.env`, then restart the service.
+
+If you ever need to opt back into live writes after the schema fix is complete, set:
+
+```bash
+OPENCLAW_ENABLE_LIVE_WRITES=true
+OPENCLAW_CONFIG_PATH=/home/zia-basit/.openclaw/openclaw.json
+OPENCLAW_RESET_SOURCE_PATH=/home/zia-basit/.openclaw/openclaw.seed.json
+```
+
+Until then, leave live writes disabled.
 
 The included templates are:
 

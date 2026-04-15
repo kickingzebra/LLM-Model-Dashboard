@@ -10,6 +10,7 @@ const auditLogPath = process.env.OPENCLAW_AUDIT_LOG_PATH || null;
 const modelProbeScriptPath = process.env.OPENCLAW_MODEL_PROBE_SCRIPT_PATH || null;
 const probeResultsPath = process.env.OPENCLAW_PROBE_RESULTS_PATH || null;
 const testReportPath = process.env.OPENCLAW_TEST_REPORT_PATH || null;
+const allowLiveWrites = process.env.OPENCLAW_ENABLE_LIVE_WRITES === 'true';
 const host = process.env.HOST || '127.0.0.1';
 
 const port = Number(process.env.PORT || 3024);
@@ -21,6 +22,7 @@ const app = createApp({
   modelProbeScriptPath: modelProbeScriptPath ? path.resolve(modelProbeScriptPath) : null,
   probeResultsPath: probeResultsPath ? path.resolve(probeResultsPath) : null,
   testReportPath: testReportPath ? path.resolve(testReportPath) : null,
+  allowLiveWrites,
   host,
   port
 });
@@ -46,6 +48,7 @@ app
     if (testReportPath) {
       console.log(`Using test report path: ${testReportPath}`);
     }
+    console.log(`Live writes enabled: ${allowLiveWrites ? 'yes' : 'no'}`);
   })
   .catch((error) => {
     console.error(error);

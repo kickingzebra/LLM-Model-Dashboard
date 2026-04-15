@@ -8,9 +8,11 @@ SERVICE_NAME="${SERVICE_NAME:-openclaw-dashboard}"
 PROBE_SCRIPT_PATH="${PROBE_SCRIPT_PATH:-$HOME/scripts/ollama_tool_probe.sh}"
 PORT="${PORT:-3024}"
 HOST="${HOST:-0.0.0.0}"
+ALLOW_LIVE_WRITES="${ALLOW_LIVE_WRITES:-false}"
 
-CONFIG_PATH="$OPENCLAW_DIR/openclaw.json"
-SEED_PATH="$OPENCLAW_DIR/openclaw.seed.json"
+LIVE_CONFIG_PATH="$OPENCLAW_DIR/openclaw.json"
+CONFIG_PATH="${CONFIG_PATH:-$OPENCLAW_DIR/openclaw.sandbox.json}"
+SEED_PATH="${SEED_PATH:-$OPENCLAW_DIR/openclaw.sandbox.seed.json}"
 AUDIT_LOG_PATH="$OPENCLAW_DIR/model-history.log.json"
 PROBE_RESULTS_PATH="$OPENCLAW_DIR/model-probe-results.json"
 TEST_REPORT_PATH="$OPENCLAW_DIR/test-regression-report.json"
@@ -29,8 +31,8 @@ if [[ ! -d "$APP_DIR" ]]; then
   exit 1
 fi
 
-if [[ ! -f "$CONFIG_PATH" ]]; then
-  echo "error: live OpenClaw config not found: $CONFIG_PATH" >&2
+if [[ ! -f "$LIVE_CONFIG_PATH" ]]; then
+  echo "error: live OpenClaw config not found: $LIVE_CONFIG_PATH" >&2
   exit 1
 fi
 
@@ -41,11 +43,18 @@ fi
 
 mkdir -p "$OPENCLAW_DIR" "$SERVICE_DIR"
 
-if [[ ! -f "$SEED_PATH" ]]; then
-  echo "==> Creating seed copy: $SEED_PATH"
-  cp "$CONFIG_PATH" "$SEED_PATH"
+if [[ ! -f "$CONFIG_PATH" ]]; then
+  echo "==> Creating sandbox copy: $CONFIG_PATH"
+  cp "$LIVE_CONFIG_PATH" "$CONFIG_PATH"
 else
-  echo "==> Seed copy already exists: $SEED_PATH"
+  echo "==> Sandbox copy already exists: $CONFIG_PATH"
+fi
+
+if [[ ! -f "$SEED_PATH" ]]; then
+  echo "==> Creating sandbox seed copy: $SEED_PATH"
+  cp "$LIVE_CONFIG_PATH" "$SEED_PATH"
+else
+  echo "==> Sandbox seed copy already exists: $SEED_PATH"
 fi
 
 echo "==> Running regression suite"
@@ -64,6 +73,7 @@ OPENCLAW_AUDIT_LOG_PATH=$AUDIT_LOG_PATH
 OPENCLAW_MODEL_PROBE_SCRIPT_PATH=$PROBE_SCRIPT_PATH
 OPENCLAW_PROBE_RESULTS_PATH=$PROBE_RESULTS_PATH
 OPENCLAW_TEST_REPORT_PATH=$TEST_REPORT_PATH
+OPENCLAW_ENABLE_LIVE_WRITES=$ALLOW_LIVE_WRITES
 EOF
 
 echo "==> Installing systemd user service: $SERVICE_FILE"
@@ -89,3 +99,5 @@ if [[ "$HOST" == "0.0.0.0" ]]; then
 fi
 echo "Environment file: $ENV_FILE"
 echo "Service file: $SERVICE_FILE"
+echo "Config target: $CONFIG_PATH"
+echo "Live writes enabled: $ALLOW_LIVE_WRITES"

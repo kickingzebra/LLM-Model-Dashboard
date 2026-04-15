@@ -9,8 +9,10 @@ const { createApp } = require('../src/app');
 async function withApp(options = {}) {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openclaw-dashboard-server-'));
   const fixturePath = path.join(__dirname, 'fixtures', 'openclaw.valid.json');
-  const configPath = path.join(tempDir, 'openclaw.json');
-  const resetSourcePath = path.join(tempDir, 'openclaw.seed.json');
+  const configFilename = options.configFilename || 'openclaw.sandbox.json';
+  const resetFilename = options.resetFilename || 'openclaw.sandbox.seed.json';
+  const configPath = path.join(tempDir, configFilename);
+  const resetSourcePath = path.join(tempDir, resetFilename);
   const auditLogPath = path.join(tempDir, 'model-history.log.json');
   const probeResultsPath = path.join(tempDir, 'model-probe-results.json');
   const testReportPath = path.join(tempDir, 'test-report.json');
@@ -103,10 +105,32 @@ TOOLS_SUMMARY=add_numbers {"a":2,"b":2}`,
   assert.equal(payload.ok, true);
   assert.equal(payload.validation.ok, true);
   assert.match(payload.message, /validation passed/i);
-  assert.match(payload.backup.path, /openclaw\.json\.bak\.20260414T111500$/);
+  assert.match(payload.backup.path, /openclaw\.sandbox\.json\.bak\.20260414T111500$/);
   assert.equal(payload.probe.ok, true);
   assert.equal(payload.probe.entries[0].toolsOutcome, 'tool_calls_returned');
   assert.equal(saved.agents.defaults.model.primary, 'qwen3:8b');
+});
+
+test('saving a model switch is blocked for the live config path unless explicitly enabled', async () => {
+  const { app, configPath } = await withApp({
+    configFilename: 'openclaw.json',
+    resetFilename: 'openclaw.seed.json'
+  });
+  const original = await fs.readFile(configPath, 'utf8');
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/config/primary-model',
+    headers: { 'content-type': 'application/json' },
+    body: { modelId: 'qwen3:8b' }
+  });
+  const payload = response.json();
+  const current = await fs.readFile(configPath, 'utf8');
+
+  assert.equal(response.statusCode, 403);
+  assert.equal(payload.ok, false);
+  assert.match(payload.message, /live config writes are disabled/i);
+  assert.equal(current, original);
 });
 
 test('saving a model switch exposes the latest backup path in dashboard state', async () => {
@@ -143,7 +167,7 @@ TOOLS_SUMMARY=add_numbers {"a":2,"b":2}`,
   const payload = response.json();
 
   assert.equal(response.statusCode, 200);
-  assert.match(payload.history[0].backupPath, /openclaw\.json\.bak\.20260414T111500$/);
+  assert.match(payload.history[0].backupPath, /openclaw\.sandbox\.json\.bak\.20260414T111500$/);
   assert.equal(payload.probeResults[0].model, 'qwen3:8b');
 });
 
@@ -186,7 +210,7 @@ test('reset endpoint restores the sandbox config to the seed state', async () =>
 
   assert.equal(response.statusCode, 200);
   assert.equal(payload.ok, true);
-  assert.match(payload.message, /sandbox config restored/i);
+  assert.match(payload.message, /active config restored/i);
   assert.equal(saved.agents.defaults.model.primary, 'llama3.2:3b');
 });
 

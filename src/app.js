@@ -18,9 +18,12 @@ function createApp(options) {
     now,
     fetchImpl,
     runCommand,
+    allowLiveWrites = false,
     host = '127.0.0.1',
     port = 3000
   } = options;
+
+  const liveConfigProtected = isProtectedLiveConfigPath(configPath) && !allowLiveWrites;
 
   const configService = createConfigService({ configPath, resetSourcePath, auditLogPath, now });
   const systemService = createSystemService({
@@ -52,7 +55,7 @@ function createApp(options) {
           config,
           installedModels: health.ollama.models,
           health,
-          summary: summarizeConfig(config),
+          summary: summarizeConfig(config, { configPath, liveConfigProtected }),
           history,
           probeResults,
           testStatus
@@ -70,6 +73,13 @@ function createApp(options) {
       }
 
       if (request.method === 'POST' && request.url === '/api/config/primary-model') {
+        if (liveConfigProtected) {
+          return sendJson(response, 403, {
+            ok: false,
+            message: 'Live config writes are disabled. Point the dashboard at a sandbox config or explicitly enable live writes after the schema fix is complete.'
+          });
+        }
+
         const body = await readJsonBody(request);
         const result = await configService.savePrimaryModel({
           modelId: body.modelId,
@@ -103,6 +113,13 @@ function createApp(options) {
       }
 
       if (request.method === 'POST' && request.url === '/api/config/reset') {
+        if (liveConfigProtected) {
+          return sendJson(response, 403, {
+            ok: false,
+            message: 'Live config writes are disabled. Reset is only available when the dashboard is pointed at a sandbox config.'
+          });
+        }
+
         const body = await readJsonBody(request);
         if (!body.confirm) {
           return sendJson(response, 400, {
@@ -114,7 +131,7 @@ function createApp(options) {
         const result = await configService.resetConfig();
         return sendJson(response, 200, {
           ok: true,
-          message: 'Sandbox config restored from seed copy.',
+          message: 'Active config restored from seed copy.',
           validation: result.validation,
           backup: result.backup,
           restored: result.restored
@@ -217,9 +234,10 @@ function createMockRequest({ method, url, headers, body }) {
   };
 }
 
-function summarizeConfig(config) {
+function summarizeConfig(config, options = {}) {
   const defaults = config?.agents?.defaults || {};
   const telegram = config?.integrations?.telegram || {};
+  const { configPath = null, liveConfigProtected = false } = options;
 
   return {
     primaryModel: defaults?.model?.primary || null,
@@ -228,8 +246,19 @@ function summarizeConfig(config) {
     toolCapableConfiguredModels: listToolCapableConfiguredModels(config),
     telegramEnabled: Boolean(telegram.enabled),
     telegramChannelConfigured: Boolean(telegram.channelId),
-    toolProfile: defaults.toolProfile || null
+    toolProfile: defaults.toolProfile || null,
+    configPath,
+    writeMode: liveConfigProtected ? 'sandbox-only' : 'live-enabled'
   };
+}
+
+function isProtectedLiveConfigPath(configPath) {
+  if (!configPath) {
+    return false;
+  }
+
+  const normalized = String(configPath).toLowerCase();
+  return normalized.endsWith('/openclaw.json') || normalized === 'openclaw.json';
 }
 
 function renderDashboardHtml() {
@@ -729,13 +758,13 @@ function renderDashboardHtml() {
           <h2>Primary Model</h2>
           <span class="card-kicker">Switch</span>
         </div>
-        <p class="meta">Choose the model you want OpenClaw to treat as the active primary in the sandbox config. Save will validate the updated JSON and create a recovery backup first.</p>
+        <p class="meta">Choose the model you want OpenClaw to treat as the active primary in the active config. Save will validate the updated JSON and create a recovery backup first.</p>
         <label for="model-select">Choose configured or installed model</label>
         <select id="model-select"></select>
         <div class="actions">
           <button id="save-button">Save Model</button>
           <button id="refresh-button" class="ghost">Refresh</button>
-          <button id="reset-button" class="secondary">Reset Sandbox Config</button>
+          <button id="reset-button" class="secondary">Reset Active Config</button>
         </div>
         <div class="pill-row">
           <span class="pill">Configured catalog</span>
@@ -790,7 +819,7 @@ function renderDashboardHtml() {
           <span class="card-kicker">Overview</span>
         </div>
         <ul id="config-summary" class="list"></ul>
-        <div class="summary-note">Tip: use <span class="subtle-strong">Save Model</span> to test a change, then use <span class="subtle-strong">Reset Sandbox Config</span> to get back to the known-good seed state.</div>
+        <div class="summary-note">Tip: use <span class="subtle-strong">Save Model</span> to test a change, then use <span class="subtle-strong">Reset Active Config</span> to get back to the known-good seed state.</div>
       </article>
       <article class="card card-history">
         <div class="card-head">
@@ -884,7 +913,9 @@ function renderDashboardHtml() {
         '<li><strong>Installed models:</strong> ' + (payload.installedModels.join(', ') || 'None detected') + '</li>',
         '<li><strong>Telegram enabled:</strong> ' + (summary.telegramEnabled ? 'Yes' : 'No') + '</li>',
         '<li><strong>Telegram channel configured:</strong> ' + (summary.telegramChannelConfigured ? 'Yes' : 'No') + '</li>',
-        '<li><strong>Tool profile:</strong> ' + (summary.toolProfile || 'Not set') + '</li>'
+        '<li><strong>Tool profile:</strong> ' + (summary.toolProfile || 'Not set') + '</li>',
+        '<li><strong>Config path:</strong> ' + escapeHtml(summary.configPath || 'Not set') + '</li>',
+        '<li><strong>Write mode:</strong> ' + escapeHtml(summary.writeMode) + '</li>'
       ].join('');
       document.getElementById('history-list').innerHTML = payload.history.length
         ? payload.history.map((entry) =>
@@ -1074,7 +1105,7 @@ function renderDashboardHtml() {
       const statusText = response.ok
         ? (payload.validation?.message || 'Validation passed.') +
           ' Backup: ' + (payload.backup?.path || 'created') +
-          '. Sandbox config restored.'
+          '. Active config restored.'
         : (payload.message || 'Reset failed.');
       setMessage('save-status', statusText, !response.ok);
       if (response.ok) {
