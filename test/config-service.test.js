@@ -8,7 +8,9 @@ const {
   createConfigService,
   validateConfigText,
   switchPrimaryModel,
-  maskSecrets
+  maskSecrets,
+  listConfiguredModelIds,
+  listToolCapableConfiguredModels
 } = require('../src/config-service');
 
 async function createTempConfigFixture() {
@@ -29,7 +31,7 @@ test('loads and parses config from disk', async () => {
   assert.equal(result.models.providers.ollama.models['qwen3:8b'].compat.supportsTools, true);
 });
 
-test('switching the primary model updates defaults and active models map', () => {
+test('switching the primary model updates primary routing without overwriting chat', () => {
   const fixture = require('./fixtures/openclaw.valid.json');
 
   const updated = switchPrimaryModel(structuredClone(fixture), {
@@ -38,7 +40,7 @@ test('switching the primary model updates defaults and active models map', () =>
 
   assert.equal(updated.agents.defaults.model.primary, 'qwen3:8b');
   assert.equal(updated.agents.defaults.models.primary.model, 'qwen3:8b');
-  assert.equal(updated.agents.defaults.models.chat.model, 'qwen3:8b');
+  assert.equal(updated.agents.defaults.models.chat.model, 'llama3.2:3b');
   assert.equal(updated.agents.defaults.routing.primaryModel, 'qwen3:8b');
   assert.equal(updated.agents.defaults.models.fallback.model, 'llama3.1:8b');
 });
@@ -75,6 +77,69 @@ test('can insert a missing model into the ollama catalog while switching', () =>
   assert.equal(updated.models.providers.ollama.models['gemma3:12b'].notes, 'chat-only');
 });
 
+test('array-based model catalogs return real model ids instead of numeric indexes', () => {
+  const config = {
+    models: {
+      providers: {
+        ollama: {
+          models: [
+            { name: 'llama3.2:3b', compat: { supportsTools: true } },
+            { name: 'qwen3:8b', compat: { supportsTools: true } },
+            { name: 'gemma3:12b', compat: { supportsTools: false } }
+          ]
+        }
+      }
+    }
+  };
+
+  assert.deepEqual(listConfiguredModelIds(config), ['llama3.2:3b', 'qwen3:8b', 'gemma3:12b']);
+  assert.deepEqual(listToolCapableConfiguredModels(config), ['llama3.2:3b', 'qwen3:8b']);
+});
+
+test('switching the primary model works when the config catalog is an array', () => {
+  const config = {
+    agents: {
+      defaults: {
+        model: {
+          provider: 'ollama',
+          primary: 'llama3.2:3b'
+        },
+        models: {
+          primary: {
+            provider: 'ollama',
+            model: 'llama3.2:3b'
+          },
+          chat: {
+            provider: 'ollama',
+            model: 'llama3.2:3b'
+          }
+        },
+        routing: {
+          provider: 'ollama',
+          primaryModel: 'llama3.2:3b'
+        }
+      }
+    },
+    models: {
+      providers: {
+        ollama: {
+          models: [
+            { name: 'llama3.2:3b', compat: { supportsTools: true } },
+            { name: 'qwen3:8b', compat: { supportsTools: true } }
+          ]
+        }
+      }
+    }
+  };
+
+  const updated = switchPrimaryModel(config, { modelId: 'qwen3:8b' });
+
+  assert.equal(updated.agents.defaults.model.primary, 'qwen3:8b');
+  assert.equal(updated.agents.defaults.models.primary.model, 'qwen3:8b');
+  assert.equal(updated.agents.defaults.models.chat.model, 'llama3.2:3b');
+  assert.equal(updated.agents.defaults.routing.primaryModel, 'qwen3:8b');
+});
+
 test('saving creates a backup before writing the updated config', async () => {
   const { configPath } = await createTempConfigFixture();
   const service = createConfigService({ configPath, now: () => '20260414T103000' });
@@ -92,9 +157,59 @@ test('saving creates a backup before writing the updated config', async () => {
   assert.equal(result.backup.path.endsWith('openclaw.json.bak.20260414T103000'), true);
   assert.equal(written.agents.defaults.model.primary, 'qwen3:8b');
   assert.equal(written.agents.defaults.models.primary.model, 'qwen3:8b');
-  assert.equal(written.agents.defaults.models.chat.model, 'qwen3:8b');
+  assert.equal(written.agents.defaults.models.chat.model, 'llama3.2:3b');
   assert.equal(written.agents.defaults.routing.primaryModel, 'qwen3:8b');
   assert.equal(written.agents.defaults.models.fallback.model, 'llama3.1:8b');
+});
+
+test('resetting the config restores the seed copy and creates a backup first', async () => {
+  const { configPath, tempDir } = await createTempConfigFixture();
+  const seedPath = path.join(tempDir, 'openclaw.seed.json');
+  const auditLogPath = path.join(tempDir, 'model-history.log.json');
+  await fs.copyFile(path.join(__dirname, 'fixtures', 'openclaw.valid.json'), seedPath);
+
+  const service = createConfigService({
+    configPath,
+    resetSourcePath: seedPath,
+    auditLogPath,
+    now: () => '20260414T120000'
+  });
+
+  await service.savePrimaryModel({ modelId: 'qwen3:8b' });
+  const resetResult = await service.resetConfig();
+  const written = JSON.parse(await fs.readFile(configPath, 'utf8'));
+
+  assert.equal(resetResult.validation.ok, true);
+  assert.equal(resetResult.restored, true);
+  assert.equal(written.agents.defaults.model.primary, 'llama3.2:3b');
+  assert.equal(written.agents.defaults.models.chat.model, 'llama3.2:3b');
+  assert.equal(written.agents.defaults.models.fallback.model, 'llama3.1:8b');
+});
+
+test('saving and resetting append model audit entries to the history log', async () => {
+  const { configPath, tempDir } = await createTempConfigFixture();
+  const seedPath = path.join(tempDir, 'openclaw.seed.json');
+  const auditLogPath = path.join(tempDir, 'model-history.log.json');
+  await fs.copyFile(path.join(__dirname, 'fixtures', 'openclaw.valid.json'), seedPath);
+
+  const service = createConfigService({
+    configPath,
+    resetSourcePath: seedPath,
+    auditLogPath,
+    now: () => '20260414T121500'
+  });
+
+  await service.savePrimaryModel({ modelId: 'qwen3:8b' });
+  await service.resetConfig();
+
+  const history = JSON.parse(await fs.readFile(auditLogPath, 'utf8'));
+
+  assert.equal(history.entries.length, 2);
+  assert.equal(history.entries[0].action, 'resetConfig');
+  assert.equal(history.entries[0].previousPrimaryModel, 'qwen3:8b');
+  assert.equal(history.entries[0].nextPrimaryModel, 'llama3.2:3b');
+  assert.equal(history.entries[1].action, 'savePrimaryModel');
+  assert.equal(history.entries[1].nextPrimaryModel, 'qwen3:8b');
 });
 
 test('invalid JSON is rejected before any write', async () => {

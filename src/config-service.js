@@ -10,6 +10,78 @@ function getOllamaCatalog(config) {
   return catalog;
 }
 
+function getCatalogModelId(entry) {
+  if (typeof entry === 'string') {
+    return entry;
+  }
+
+  if (!entry || typeof entry !== 'object') {
+    return null;
+  }
+
+  return entry.id || entry.name || entry.model || null;
+}
+
+function listConfiguredModelIds(config) {
+  const catalog = getOllamaCatalog(config);
+
+  if (Array.isArray(catalog)) {
+    return catalog
+      .map(getCatalogModelId)
+      .filter(Boolean);
+  }
+
+  return Object.keys(catalog);
+}
+
+function getCatalogEntry(config, modelId) {
+  const catalog = getOllamaCatalog(config);
+
+  if (Array.isArray(catalog)) {
+    return catalog.find((entry) => getCatalogModelId(entry) === modelId) || null;
+  }
+
+  return catalog[modelId] || null;
+}
+
+function upsertCatalogEntry(config, modelId, catalogEntry) {
+  const catalog = getOllamaCatalog(config);
+
+  if (Array.isArray(catalog)) {
+    const existingIndex = catalog.findIndex((entry) => getCatalogModelId(entry) === modelId);
+    const normalizedEntry =
+      catalogEntry && typeof catalogEntry === 'object'
+        ? { name: modelId, ...catalogEntry }
+        : { name: modelId };
+
+    if (existingIndex === -1) {
+      catalog.push(normalizedEntry);
+      return normalizedEntry;
+    }
+
+    catalog[existingIndex] = {
+      ...catalog[existingIndex],
+      ...normalizedEntry
+    };
+    return catalog[existingIndex];
+  }
+
+  catalog[modelId] = catalogEntry;
+  return catalog[modelId];
+}
+
+function listToolCapableConfiguredModels(config) {
+  const catalog = getOllamaCatalog(config);
+  const entries = Array.isArray(catalog)
+    ? catalog
+    : Object.entries(catalog).map(([id, entry]) => ({ name: id, ...entry }));
+
+  return entries
+    .filter((entry) => entry?.compat?.supportsTools === true)
+    .map((entry) => getCatalogModelId(entry))
+    .filter(Boolean);
+}
+
 function validateConfigText(text) {
   try {
     const parsed = JSON.parse(text);
@@ -27,15 +99,14 @@ function validateConfigText(text) {
 
 function switchPrimaryModel(config, options) {
   const { modelId, addToCatalog = false, catalogEntry = null } = options;
-  const catalog = getOllamaCatalog(config);
-  const previousPrimary = config?.agents?.defaults?.model?.primary || null;
+  const existingCatalogEntry = getCatalogEntry(config, modelId);
 
-  if (!catalog[modelId]) {
+  if (!existingCatalogEntry) {
     if (!addToCatalog || !catalogEntry) {
       throw new Error(`Model "${modelId}" is not configured in models.providers.ollama.models`);
     }
 
-    catalog[modelId] = catalogEntry;
+    upsertCatalogEntry(config, modelId, catalogEntry);
   }
 
   if (!config.agents) {
@@ -45,8 +116,6 @@ function switchPrimaryModel(config, options) {
   if (!config.agents.defaults) {
     config.agents.defaults = {};
   }
-
-  syncPrimaryModelReferences(config.agents.defaults, previousPrimary, modelId);
 
   config.agents.defaults.model = {
     ...config.agents.defaults.model,
@@ -64,40 +133,17 @@ function switchPrimaryModel(config, options) {
     model: modelId
   };
 
+  if (!config.agents.defaults.routing || typeof config.agents.defaults.routing !== 'object') {
+    config.agents.defaults.routing = {};
+  }
+
+  config.agents.defaults.routing = {
+    ...config.agents.defaults.routing,
+    provider: 'ollama',
+    primaryModel: modelId
+  };
+
   return config;
-}
-
-function syncPrimaryModelReferences(value, previousPrimary, nextPrimary) {
-  if (!value || typeof value !== 'object') {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      syncPrimaryModelReferences(item, previousPrimary, nextPrimary);
-    }
-
-    return value;
-  }
-
-  const isOllamaScoped = value.provider === 'ollama';
-  if (isOllamaScoped && value.model === previousPrimary) {
-    value.model = nextPrimary;
-  }
-
-  if (isOllamaScoped && value.primary === previousPrimary) {
-    value.primary = nextPrimary;
-  }
-
-  if (isOllamaScoped && value.primaryModel === previousPrimary) {
-    value.primaryModel = nextPrimary;
-  }
-
-  for (const nested of Object.values(value)) {
-    syncPrimaryModelReferences(nested, previousPrimary, nextPrimary);
-  }
-
-  return value;
 }
 
 function maskValue(value) {
@@ -134,7 +180,12 @@ function maskSecrets(input) {
   return output;
 }
 
-function createConfigService({ configPath, now = defaultTimestamp }) {
+function createConfigService({
+  configPath,
+  resetSourcePath = null,
+  auditLogPath = null,
+  now = defaultTimestamp
+}) {
   async function loadConfigText() {
     return fs.readFile(configPath, 'utf8');
   }
@@ -152,6 +203,72 @@ function createConfigService({ configPath, now = defaultTimestamp }) {
     return backupPath;
   }
 
+  async function loadHistory() {
+    if (!auditLogPath) {
+      return [];
+    }
+
+    try {
+      const text = await fs.readFile(auditLogPath, 'utf8');
+      const parsed = JSON.parse(text);
+      return Array.isArray(parsed.entries) ? parsed.entries : [];
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        return [];
+      }
+
+      throw error;
+    }
+  }
+
+  async function appendHistory(entry) {
+    if (!auditLogPath) {
+      return;
+    }
+
+    const entries = await loadHistory();
+    entries.unshift(entry);
+    const payload = {
+      entries: entries.slice(0, 50)
+    };
+    await fs.writeFile(auditLogPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  }
+
+  async function resetConfig() {
+    if (!resetSourcePath) {
+      throw new Error('Reset is not configured for this dashboard.');
+    }
+
+    const currentConfig = await loadConfig();
+    const sourceText = await fs.readFile(resetSourcePath, 'utf8');
+    const validation = validateConfigText(sourceText);
+    if (!validation.ok) {
+      throw new Error(validation.error);
+    }
+
+    const backupPath = await createBackup();
+    await fs.writeFile(configPath, `${validation.formatted}\n`, 'utf8');
+    await appendHistory({
+      timestamp: now(),
+      action: 'resetConfig',
+      previousPrimaryModel: currentConfig.agents?.defaults?.model?.primary || null,
+      nextPrimaryModel: JSON.parse(validation.formatted).agents?.defaults?.model?.primary || null,
+      backupPath
+    });
+
+    return {
+      config: JSON.parse(validation.formatted),
+      validation: {
+        ok: true,
+        message: 'Validation passed.'
+      },
+      backup: {
+        path: backupPath
+      },
+      restored: true
+    };
+  }
+
   async function writeValidatedText(text) {
     const validation = validateConfigText(text);
     if (!validation.ok) {
@@ -167,8 +284,10 @@ function createConfigService({ configPath, now = defaultTimestamp }) {
     loadConfig,
     loadConfigText,
     getMaskedConfig: async () => maskSecrets(await loadConfig()),
+    getHistory: loadHistory,
     savePrimaryModel: async (options) => {
       const config = await loadConfig();
+      const previousPrimaryModel = config?.agents?.defaults?.model?.primary || null;
       const updated = switchPrimaryModel(config, options);
       const text = JSON.stringify(updated, null, 2);
       const validation = validateConfigText(text);
@@ -178,6 +297,13 @@ function createConfigService({ configPath, now = defaultTimestamp }) {
 
       const backupPath = await createBackup();
       await fs.writeFile(configPath, `${validation.formatted}\n`, 'utf8');
+      await appendHistory({
+        timestamp: now(),
+        action: 'savePrimaryModel',
+        previousPrimaryModel,
+        nextPrimaryModel: options.modelId,
+        backupPath
+      });
 
       return {
         config: updated,
@@ -193,7 +319,8 @@ function createConfigService({ configPath, now = defaultTimestamp }) {
     },
     writeRawConfig: writeValidatedText,
     validateText: validateConfigText,
-    createBackup
+    createBackup,
+    resetConfig
   };
 }
 
@@ -205,5 +332,7 @@ module.exports = {
   createConfigService,
   validateConfigText,
   switchPrimaryModel,
-  maskSecrets
+  maskSecrets,
+  listConfiguredModelIds,
+  listToolCapableConfiguredModels
 };
