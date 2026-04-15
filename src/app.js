@@ -1171,7 +1171,8 @@ function renderDashboardHtml() {
             '<span class="history-action">' + entry.action + '</span>' +
             '<div><strong>' + (entry.previousPrimaryModel || 'none') + '</strong> -> <strong>' + (entry.nextPrimaryModel || 'none') + '</strong></div>' +
             '<span class="history-meta">Backup: ' + (entry.backupPath || 'not recorded') + '</span>' +
-            '<span class="history-meta">Timestamp: ' + entry.timestamp + '</span>' +
+            '<span class="history-meta">When: ' + escapeHtml(entry.timestampIso || entry.timestamp || 'not recorded') + '</span>' +
+            '<span class="history-meta">Stamp: ' + escapeHtml(entry.timestamp || 'not recorded') + '</span>' +
             '</li>'
           ).join('')
         : '<li class="empty">No changes logged yet.</li>';

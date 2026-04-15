@@ -320,10 +320,28 @@ test('saving and resetting append model audit entries to the history log', async
 
   assert.equal(history.entries.length, 2);
   assert.equal(history.entries[0].action, 'resetConfig');
+  assert.equal(history.entries[0].timestampIso, '2026-04-14T12:15:00Z');
   assert.equal(history.entries[0].previousPrimaryModel, 'qwen3:8b');
   assert.equal(history.entries[0].nextPrimaryModel, 'llama3.2:3b');
   assert.equal(history.entries[1].action, 'savePrimaryModel');
+  assert.equal(history.entries[1].timestampIso, '2026-04-14T12:15:00Z');
   assert.equal(history.entries[1].nextPrimaryModel, 'qwen3:8b');
+});
+
+test('saving records an ISO timestamp for exact model-change review', async () => {
+  const { configPath, tempDir } = await createTempConfigFixture();
+  const auditLogPath = path.join(tempDir, 'model-history.log.json');
+  const service = createConfigService({
+    configPath,
+    auditLogPath,
+    now: () => '20260415T191500Z'
+  });
+
+  await service.savePrimaryModel({ modelId: 'qwen3:8b' });
+  const history = JSON.parse(await fs.readFile(auditLogPath, 'utf8'));
+
+  assert.equal(history.entries[0].timestamp, '20260415T191500Z');
+  assert.equal(history.entries[0].timestampIso, '2026-04-15T19:15:00Z');
 });
 
 test('invalid JSON is rejected before any write', async () => {
