@@ -972,6 +972,21 @@ function renderDashboardHtml() {
       ].join('');
     }
 
+    function buildHealthStatusMessage(health) {
+      if (health.ok) {
+        return 'Health checks passed.';
+      }
+
+      const failed = Array.isArray(health.failedChecks) ? health.failedChecks : [];
+      if (!failed.length) {
+        return 'One or more health checks failed.';
+      }
+
+      return 'Health checks failed: ' + failed
+        .map((check) => check.label + ' (' + check.message + ')')
+        .join('; ');
+    }
+
     async function loadState(options = {}) {
       const {
         announce = false,
@@ -1030,7 +1045,7 @@ function renderDashboardHtml() {
       const response = await fetch('/api/health');
       const payload = await response.json();
       renderHealth(payload);
-      setMessage('health-status', payload.openclaw.ok && payload.ollama.ok ? 'Health checks passed.' : 'One or more health checks failed.', !(payload.openclaw.ok && payload.ollama.ok));
+      setMessage('health-status', buildHealthStatusMessage(payload), !payload.ok);
     }
 
     async function restartGateway() {

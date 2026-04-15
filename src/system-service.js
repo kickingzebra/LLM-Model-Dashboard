@@ -18,7 +18,24 @@ function createSystemService({
         fetchJson(fetchImpl, ollamaTagsUrl, 'Ollama API')
       ]);
 
+      const failedChecks = [
+        !openclaw.ok ? {
+          id: 'openclaw',
+          label: 'OpenClaw gateway',
+          status: openclaw.status,
+          message: openclaw.message
+        } : null,
+        !ollama.ok ? {
+          id: 'ollama',
+          label: 'Ollama API',
+          status: ollama.status,
+          message: ollama.message
+        } : null
+      ].filter(Boolean);
+
       return {
+        ok: failedChecks.length === 0,
+        failedChecks,
         openclaw: {
           ok: openclaw.ok,
           status: openclaw.status,

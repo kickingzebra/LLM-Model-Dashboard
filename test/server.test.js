@@ -275,6 +275,38 @@ test('dashboard state uses real model names for array-based catalogs', async () 
   ]);
 });
 
+test('health endpoint reports which checks failed', async () => {
+  const { app } = await withApp({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/health')) {
+        throw new Error('gateway down');
+      }
+
+      return new Response('bad gateway', { status: 502 });
+    }
+  });
+
+  const response = await app.inject({ url: '/api/health' });
+  const payload = response.json();
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(payload.ok, false);
+  assert.deepEqual(payload.failedChecks, [
+    {
+      id: 'openclaw',
+      label: 'OpenClaw gateway',
+      status: 0,
+      message: 'OpenClaw gateway check failed: gateway down'
+    },
+    {
+      id: 'ollama',
+      label: 'Ollama API',
+      status: 502,
+      message: 'Ollama API returned HTTP 502'
+    }
+  ]);
+});
+
 test('batch probe endpoint runs the documented capability check for multiple models', async () => {
   const calls = [];
   const { app } = await withApp({

@@ -28,6 +28,8 @@ test('health checks return clear success states', async () => {
 
   const result = await service.checkHealth();
 
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.failedChecks, []);
   assert.equal(result.openclaw.ok, true);
   assert.equal(result.ollama.ok, true);
   assert.deepEqual(result.ollama.models, ['qwen3:8b']);
@@ -46,6 +48,21 @@ test('health checks return clear failure states', async () => {
 
   const result = await service.checkHealth();
 
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.failedChecks, [
+    {
+      id: 'openclaw',
+      label: 'OpenClaw gateway',
+      status: 0,
+      message: 'OpenClaw gateway check failed: gateway down'
+    },
+    {
+      id: 'ollama',
+      label: 'Ollama API',
+      status: 502,
+      message: 'Ollama API returned HTTP 502'
+    }
+  ]);
   assert.equal(result.openclaw.ok, false);
   assert.match(result.openclaw.message, /gateway down/);
   assert.equal(result.ollama.ok, false);
