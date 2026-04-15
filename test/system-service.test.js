@@ -120,3 +120,36 @@ TOOLS_SUMMARY=add_numbers {"a":2,"b":2}`,
   assert.equal(saved.entries[0].toolsOutcome, 'tool_calls_returned');
   assert.equal(saved.entries[0].timestamp, '20260414T170000');
 });
+
+test('runModelProbeBatch probes each requested model once', async () => {
+  const calls = [];
+  const service = createSystemService({
+    modelProbeScriptPath: '/tmp/fake-probe.sh',
+    now: () => '20260414T171000',
+    runCommand: async (command, args) => {
+      calls.push([command, args]);
+      const modelId = args[1];
+      return {
+        code: 0,
+        stdout: `-----
+MODEL=${modelId}
+CHAT_HTTP=200
+CHAT_OK=yes
+CHAT_SUMMARY=CHAT_OK
+TOOLS_HTTP=200
+TOOLS_OUTCOME=tool_calls_returned
+TOOLS_SUMMARY=add_numbers {"a":2,"b":2}`,
+        stderr: ''
+      };
+    }
+  });
+
+  const result = await service.runModelProbeBatch(['qwen3:8b', 'llama3.1:8b', 'qwen3:8b']);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.entries.length, 2);
+  assert.deepEqual(calls, [
+    ['/bin/bash', ['/tmp/fake-probe.sh', 'qwen3:8b']],
+    ['/bin/bash', ['/tmp/fake-probe.sh', 'llama3.1:8b']]
+  ]);
+});

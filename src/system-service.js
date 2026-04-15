@@ -131,6 +131,39 @@ function createSystemService({
         message: 'Direct Ollama capability probe completed.',
         entries
       };
+    },
+    async runModelProbeBatch(modelIds) {
+      const uniqueModelIds = Array.from(new Set((modelIds || []).filter(Boolean)));
+      if (uniqueModelIds.length === 0) {
+        return {
+          ok: false,
+          skipped: true,
+          message: 'No models were provided for probing.',
+          entries: []
+        };
+      }
+
+      const entries = [];
+      for (const modelId of uniqueModelIds) {
+        const result = await this.runModelProbe(modelId);
+        if (!result.ok) {
+          return {
+            ok: false,
+            skipped: result.skipped,
+            message: `Probe failed for ${modelId}: ${result.message}`,
+            entries
+          };
+        }
+
+        entries.push(...result.entries);
+      }
+
+      return {
+        ok: true,
+        skipped: false,
+        message: `Direct Ollama capability probe completed for ${uniqueModelIds.length} model(s).`,
+        entries
+      };
     }
   };
 }
