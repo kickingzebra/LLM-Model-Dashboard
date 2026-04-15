@@ -9,6 +9,7 @@ PROBE_SCRIPT_PATH="${PROBE_SCRIPT_PATH:-$HOME/scripts/ollama_tool_probe.sh}"
 PORT="${PORT:-3024}"
 HOST="${HOST:-0.0.0.0}"
 ALLOW_LIVE_WRITES="${ALLOW_LIVE_WRITES:-false}"
+MODEL_LIVE_LOG_PATH="${MODEL_LIVE_LOG_PATH:-}"
 
 LIVE_CONFIG_PATH="$OPENCLAW_DIR/openclaw.json"
 LIVE_SEED_PATH="${LIVE_SEED_PATH:-$OPENCLAW_DIR/openclaw.seed.json}"
@@ -81,6 +82,12 @@ OPENCLAW_TEST_REPORT_PATH=$TEST_REPORT_PATH
 OPENCLAW_ENABLE_LIVE_WRITES=$ALLOW_LIVE_WRITES
 EOF
 
+if [[ -n "$MODEL_LIVE_LOG_PATH" ]]; then
+  cat >>"$ENV_FILE" <<EOF
+OPENCLAW_MODEL_LIVE_LOG_PATH=$MODEL_LIVE_LOG_PATH
+EOF
+fi
+
 echo "==> Installing systemd user service: $SERVICE_FILE"
 sed \
   -e "s|__APP_DIR__|$APP_DIR|g" \
@@ -106,3 +113,6 @@ echo "Environment file: $ENV_FILE"
 echo "Service file: $SERVICE_FILE"
 echo "Config target: $CONFIG_PATH"
 echo "Live writes enabled: $ALLOW_LIVE_WRITES"
+if [[ -n "$MODEL_LIVE_LOG_PATH" ]]; then
+  echo "Model live log path: $MODEL_LIVE_LOG_PATH"
+fi
