@@ -109,6 +109,23 @@ That makes the dashboard reachable from another machine on your LAN, such as you
 http://192.168.86.30:3024
 ```
 
+If your Mac is connected over Tailscale instead of the local LAN, use the GEEKOM Tailscale address instead of the `192.168.86.x` LAN address. For example:
+
+```text
+http://100.99.231.1:3024
+```
+
+Quick rule:
+
+- use the `192.168.86.x` URL when the Mac and GEEKOM are on the same local network
+- use the `100.x.x.x` Tailscale URL when the Mac is reaching GEEKOM through Tailscale
+
+You can confirm the current GEEKOM Tailscale address with:
+
+```bash
+tailscale ip -4
+```
+
 If you want the dashboard to be GEEKOM-local only, set:
 
 ```bash
