@@ -140,6 +140,43 @@ test('switching the primary model works when the config catalog is an array', ()
   assert.equal(updated.agents.defaults.routing.primaryModel, 'qwen3:8b');
 });
 
+test('switching the primary model preserves live-style string references without creating routing', () => {
+  const config = {
+    agents: {
+      defaults: {
+        model: 'ollama/llama3.2:3b',
+        models: {
+          primary: 'ollama/llama3.2:3b',
+          chat: 'ollama/llama3.2:3b',
+          fallback: 'ollama/llama3.1:8b'
+        },
+        toolProfile: 'minimal'
+      }
+    },
+    models: {
+      providers: {
+        ollama: {
+          models: {
+            'llama3.2:3b': { compat: { supportsTools: true } },
+            'qwen3:8b': { compat: { supportsTools: true } },
+            'llama3.1:8b': { compat: { supportsTools: true } }
+          }
+        }
+      }
+    }
+  };
+
+  const updated = switchPrimaryModel(structuredClone(config), {
+    modelId: 'qwen3:8b'
+  });
+
+  assert.equal(updated.agents.defaults.model, 'ollama/qwen3:8b');
+  assert.equal(updated.agents.defaults.models.primary, 'ollama/qwen3:8b');
+  assert.equal(updated.agents.defaults.models.chat, 'ollama/llama3.2:3b');
+  assert.equal(updated.agents.defaults.models.fallback, 'ollama/llama3.1:8b');
+  assert.equal('routing' in updated.agents.defaults, false);
+});
+
 test('saving creates a backup before writing the updated config', async () => {
   const { configPath } = await createTempConfigFixture();
   const service = createConfigService({ configPath, now: () => '20260414T103000' });
@@ -160,6 +197,45 @@ test('saving creates a backup before writing the updated config', async () => {
   assert.equal(written.agents.defaults.models.chat.model, 'llama3.2:3b');
   assert.equal(written.agents.defaults.routing.primaryModel, 'qwen3:8b');
   assert.equal(written.agents.defaults.models.fallback.model, 'llama3.1:8b');
+});
+
+test('saving preserves live-style string references on disk', async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openclaw-dashboard-live-'));
+  const configPath = path.join(tempDir, 'openclaw.json');
+  const config = {
+    agents: {
+      defaults: {
+        model: 'ollama/llama3.2:3b',
+        models: {
+          primary: 'ollama/llama3.2:3b',
+          chat: 'ollama/llama3.2:3b',
+          fallback: 'ollama/llama3.1:8b'
+        },
+        toolProfile: 'minimal'
+      }
+    },
+    models: {
+      providers: {
+        ollama: {
+          models: {
+            'llama3.2:3b': { compat: { supportsTools: true } },
+            'qwen3:8b': { compat: { supportsTools: true } },
+            'llama3.1:8b': { compat: { supportsTools: true } }
+          }
+        }
+      }
+    }
+  };
+  await fs.writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+  const service = createConfigService({ configPath, now: () => '20260415T120000' });
+
+  await service.savePrimaryModel({ modelId: 'qwen3:8b' });
+  const written = JSON.parse(await fs.readFile(configPath, 'utf8'));
+
+  assert.equal(written.agents.defaults.model, 'ollama/qwen3:8b');
+  assert.equal(written.agents.defaults.models.primary, 'ollama/qwen3:8b');
+  assert.equal(written.agents.defaults.models.chat, 'ollama/llama3.2:3b');
+  assert.equal('routing' in written.agents.defaults, false);
 });
 
 test('resetting the config restores the seed copy and creates a backup first', async () => {

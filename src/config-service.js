@@ -97,6 +97,67 @@ function validateConfigText(text) {
   }
 }
 
+function buildProviderModelRef(modelId, existingValue = null) {
+  if (typeof existingValue === 'string' && existingValue.includes('/')) {
+    const [provider] = existingValue.split('/', 1);
+    return `${provider || 'ollama'}/${modelId}`;
+  }
+
+  return `ollama/${modelId}`;
+}
+
+function getPrimaryModelId(config) {
+  const model = config?.agents?.defaults?.model;
+  if (typeof model === 'string') {
+    return model.includes('/') ? model.split('/').slice(1).join('/') : model;
+  }
+
+  if (model && typeof model === 'object') {
+    if (typeof model.primary === 'string') {
+      return model.primary.includes('/') ? model.primary.split('/').slice(1).join('/') : model.primary;
+    }
+    if (typeof model.model === 'string') {
+      return model.model.includes('/') ? model.model.split('/').slice(1).join('/') : model.model;
+    }
+  }
+
+  return null;
+}
+
+function updateModelReference(existingValue, modelId) {
+  if (typeof existingValue === 'string') {
+    return buildProviderModelRef(modelId, existingValue);
+  }
+
+  if (existingValue && typeof existingValue === 'object') {
+    if (typeof existingValue.primary === 'string') {
+      return {
+        ...existingValue,
+        primary: existingValue.primary.includes('/')
+          ? buildProviderModelRef(modelId, existingValue.primary)
+          : modelId
+      };
+    }
+
+    if ('provider' in existingValue || 'model' in existingValue) {
+      return {
+        ...existingValue,
+        provider: existingValue.provider || 'ollama',
+        model: modelId
+      };
+    }
+
+    if (typeof existingValue.id === 'string') {
+      return {
+        ...existingValue,
+        id: existingValue.id.includes('/') ? buildProviderModelRef(modelId, existingValue.id) : modelId
+      };
+    }
+  }
+
+  return existingValue;
+}
+
 function switchPrimaryModel(config, options) {
   const { modelId, addToCatalog = false, catalogEntry = null } = options;
   const existingCatalogEntry = getCatalogEntry(config, modelId);
@@ -117,31 +178,40 @@ function switchPrimaryModel(config, options) {
     config.agents.defaults = {};
   }
 
-  config.agents.defaults.model = {
-    ...config.agents.defaults.model,
-    provider: 'ollama',
-    primary: modelId
-  };
+  if (typeof config.agents.defaults.model === 'string') {
+    config.agents.defaults.model = buildProviderModelRef(modelId, config.agents.defaults.model);
+  } else if (config.agents.defaults.model && typeof config.agents.defaults.model === 'object') {
+    config.agents.defaults.model = updateModelReference(config.agents.defaults.model, modelId);
+  } else {
+    config.agents.defaults.model = {
+      provider: 'ollama',
+      primary: modelId
+    };
+  }
 
   if (!config.agents.defaults.models || typeof config.agents.defaults.models !== 'object') {
     config.agents.defaults.models = {};
   }
 
-  config.agents.defaults.models.primary = {
-    ...(config.agents.defaults.models.primary || {}),
-    provider: 'ollama',
-    model: modelId
-  };
-
-  if (!config.agents.defaults.routing || typeof config.agents.defaults.routing !== 'object') {
-    config.agents.defaults.routing = {};
+  if ('primary' in config.agents.defaults.models) {
+    const updatedPrimary = updateModelReference(config.agents.defaults.models.primary, modelId);
+    config.agents.defaults.models.primary =
+      updatedPrimary === undefined
+        ? config.agents.defaults.models.primary
+        : updatedPrimary;
+  } else if (Object.keys(config.agents.defaults.models).length === 0) {
+    config.agents.defaults.models.primary = {
+      provider: 'ollama',
+      model: modelId
+    };
   }
 
-  config.agents.defaults.routing = {
-    ...config.agents.defaults.routing,
-    provider: 'ollama',
-    primaryModel: modelId
-  };
+  if (config.agents.defaults.routing && typeof config.agents.defaults.routing === 'object') {
+    config.agents.defaults.routing = {
+      ...config.agents.defaults.routing,
+      primaryModel: modelId
+    };
+  }
 
   return config;
 }
@@ -251,8 +321,8 @@ function createConfigService({
     await appendHistory({
       timestamp: now(),
       action: 'resetConfig',
-      previousPrimaryModel: currentConfig.agents?.defaults?.model?.primary || null,
-      nextPrimaryModel: JSON.parse(validation.formatted).agents?.defaults?.model?.primary || null,
+      previousPrimaryModel: getPrimaryModelId(currentConfig),
+      nextPrimaryModel: getPrimaryModelId(JSON.parse(validation.formatted)),
       backupPath
     });
 
@@ -287,7 +357,7 @@ function createConfigService({
     getHistory: loadHistory,
     savePrimaryModel: async (options) => {
       const config = await loadConfig();
-      const previousPrimaryModel = config?.agents?.defaults?.model?.primary || null;
+      const previousPrimaryModel = getPrimaryModelId(config);
       const updated = switchPrimaryModel(config, options);
       const text = JSON.stringify(updated, null, 2);
       const validation = validateConfigText(text);
