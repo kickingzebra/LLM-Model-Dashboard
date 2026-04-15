@@ -9,24 +9,40 @@ const { createApp } = require('../src/app');
 async function withApp(options = {}) {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openclaw-dashboard-server-'));
   const fixturePath = path.join(__dirname, 'fixtures', 'openclaw.valid.json');
-  const configFilename = options.configFilename || 'openclaw.sandbox.json';
-  const resetFilename = options.resetFilename || 'openclaw.sandbox.seed.json';
-  const configPath = path.join(tempDir, configFilename);
-  const resetSourcePath = path.join(tempDir, resetFilename);
+  const sandboxConfigFilename = options.configFilename || 'openclaw.sandbox.json';
+  const sandboxResetFilename = options.resetFilename || 'openclaw.sandbox.seed.json';
+  const sandboxConfigPath = path.join(tempDir, sandboxConfigFilename);
+  const sandboxResetSourcePath = path.join(tempDir, sandboxResetFilename);
+  const liveConfigPath = path.join(tempDir, 'openclaw.json');
+  const liveResetSourcePath = path.join(tempDir, 'openclaw.seed.json');
   const auditLogPath = path.join(tempDir, 'model-history.log.json');
   const probeResultsPath = path.join(tempDir, 'model-probe-results.json');
   const testReportPath = path.join(tempDir, 'test-report.json');
+  const liveConfig = options.liveConfig || options.initialConfig || null;
+  const configPath = options.startInLiveMode ? liveConfigPath : sandboxConfigPath;
+  const resetSourcePath = options.startInLiveMode ? liveResetSourcePath : sandboxResetSourcePath;
   if (options.initialConfig) {
-    await fs.writeFile(configPath, `${JSON.stringify(options.initialConfig, null, 2)}\n`, 'utf8');
-    await fs.writeFile(resetSourcePath, `${JSON.stringify(options.initialConfig, null, 2)}\n`, 'utf8');
+    await fs.writeFile(sandboxConfigPath, `${JSON.stringify(options.initialConfig, null, 2)}\n`, 'utf8');
+    await fs.writeFile(sandboxResetSourcePath, `${JSON.stringify(options.initialConfig, null, 2)}\n`, 'utf8');
   } else {
-    await fs.copyFile(fixturePath, configPath);
-    await fs.copyFile(fixturePath, resetSourcePath);
+    await fs.copyFile(fixturePath, sandboxConfigPath);
+    await fs.copyFile(fixturePath, sandboxResetSourcePath);
+  }
+  if (liveConfig) {
+    await fs.writeFile(liveConfigPath, `${JSON.stringify(liveConfig, null, 2)}\n`, 'utf8');
+    await fs.writeFile(liveResetSourcePath, `${JSON.stringify(liveConfig, null, 2)}\n`, 'utf8');
+  } else {
+    await fs.copyFile(fixturePath, liveConfigPath);
+    await fs.copyFile(fixturePath, liveResetSourcePath);
   }
 
   const app = createApp({
     configPath,
     resetSourcePath,
+    sandboxConfigPath,
+    sandboxResetSourcePath,
+    liveConfigPath,
+    liveResetSourcePath,
     auditLogPath,
     probeResultsPath,
     testReportPath,
@@ -34,7 +50,18 @@ async function withApp(options = {}) {
     ...options
   });
 
-  return { app, configPath, resetSourcePath, auditLogPath, probeResultsPath, testReportPath };
+  return {
+    app,
+    configPath,
+    resetSourcePath,
+    sandboxConfigPath,
+    sandboxResetSourcePath,
+    liveConfigPath,
+    liveResetSourcePath,
+    auditLogPath,
+    probeResultsPath,
+    testReportPath
+  };
 }
 
 test('dashboard state endpoint masks secrets and returns model details', async () => {
@@ -64,9 +91,49 @@ test('dashboard state endpoint masks secrets and returns model details', async (
   assert.equal(payload.config.gateway.authToken.includes('super-secret-auth-token'), false);
   assert.deepEqual(payload.installedModels, ['qwen3:8b', 'llama3.2:3b']);
   assert.deepEqual(payload.summary.toolCapableConfiguredModels, ['llama3.2:3b', 'qwen3:8b', 'llama3.1:8b']);
+  assert.equal(payload.summary.currentMode, 'sandbox');
   assert.deepEqual(payload.history, []);
   assert.deepEqual(payload.probeResults, []);
   assert.equal(payload.testStatus.lastRunAt, null);
+});
+
+test('mode switch endpoint swaps between sandbox and live config views', async () => {
+  const liveConfig = JSON.parse(await fs.readFile(path.join(__dirname, 'fixtures', 'openclaw.valid.json'), 'utf8'));
+  liveConfig.agents.defaults.model.primary = 'qwen3:8b';
+
+  const { app } = await withApp({ liveConfig });
+
+  const switchResponse = await app.inject({
+    method: 'POST',
+    url: '/api/mode',
+    headers: { 'content-type': 'application/json' },
+    body: { mode: 'live', confirm: true }
+  });
+  const switchPayload = switchResponse.json();
+  const stateResponse = await app.inject({ url: '/api/state' });
+  const statePayload = stateResponse.json();
+
+  assert.equal(switchResponse.statusCode, 200);
+  assert.equal(switchPayload.ok, true);
+  assert.equal(statePayload.summary.currentMode, 'live');
+  assert.equal(statePayload.summary.primaryModel, 'qwen3:8b');
+  assert.equal(statePayload.summary.writeMode, 'live-read-only');
+});
+
+test('switching to live mode requires confirmation', async () => {
+  const { app } = await withApp();
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/mode',
+    headers: { 'content-type': 'application/json' },
+    body: { mode: 'live' }
+  });
+  const payload = response.json();
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(payload.ok, false);
+  assert.match(payload.message, /confirmation is required/i);
 });
 
 test('saving a model switch updates config and returns success feedback', async () => {
@@ -112,10 +179,7 @@ TOOLS_SUMMARY=add_numbers {"a":2,"b":2}`,
 });
 
 test('saving a model switch is blocked for the live config path unless explicitly enabled', async () => {
-  const { app, configPath } = await withApp({
-    configFilename: 'openclaw.json',
-    resetFilename: 'openclaw.seed.json'
-  });
+  const { app, configPath } = await withApp({ startInLiveMode: true });
   const original = await fs.readFile(configPath, 'utf8');
 
   const response = await app.inject({

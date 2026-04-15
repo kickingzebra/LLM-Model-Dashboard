@@ -11,6 +11,10 @@ function createApp(options) {
   const {
     configPath,
     resetSourcePath,
+    sandboxConfigPath = configPath,
+    sandboxResetSourcePath = resetSourcePath,
+    liveConfigPath = null,
+    liveResetSourcePath = null,
     auditLogPath,
     modelProbeScriptPath,
     probeResultsPath,
@@ -23,9 +27,6 @@ function createApp(options) {
     port = 3000
   } = options;
 
-  const liveConfigProtected = isProtectedLiveConfigPath(configPath) && !allowLiveWrites;
-
-  const configService = createConfigService({ configPath, resetSourcePath, auditLogPath, now });
   const systemService = createSystemService({
     fetchImpl,
     runCommand,
@@ -34,6 +35,37 @@ function createApp(options) {
     testReportPath,
     now
   });
+  let currentMode = determineInitialMode({
+    initialConfigPath: configPath,
+    sandboxConfigPath,
+    liveConfigPath
+  });
+
+  function getModePaths(mode = currentMode) {
+    if (mode === 'live') {
+      return {
+        configPath: liveConfigPath,
+        resetSourcePath: liveResetSourcePath,
+        protected: Boolean(liveConfigPath) && !allowLiveWrites
+      };
+    }
+
+    return {
+      configPath: sandboxConfigPath,
+      resetSourcePath: sandboxResetSourcePath,
+      protected: isProtectedLiveConfigPath(sandboxConfigPath) && !allowLiveWrites
+    };
+  }
+
+  function getConfigService(mode = currentMode) {
+    const paths = getModePaths(mode);
+    return createConfigService({
+      configPath: paths.configPath,
+      resetSourcePath: paths.resetSourcePath,
+      auditLogPath,
+      now
+    });
+  }
 
   const handler = async (request, response) => {
     try {
@@ -42,6 +74,8 @@ function createApp(options) {
       }
 
       if (request.method === 'GET' && request.url === '/api/state') {
+        const configService = getConfigService();
+        const modePaths = getModePaths();
         const [config, health, history, probeResults, testStatus] = await Promise.all([
           configService.getMaskedConfig(),
           systemService.checkHealth(),
@@ -55,7 +89,12 @@ function createApp(options) {
           config,
           installedModels: health.ollama.models,
           health,
-          summary: summarizeConfig(config, { configPath, liveConfigProtected }),
+          summary: summarizeConfig(config, {
+            configPath: modePaths.configPath,
+            currentMode,
+            liveAvailable: Boolean(liveConfigPath),
+            liveWritesEnabled: allowLiveWrites
+          }),
           history,
           probeResults,
           testStatus
@@ -67,19 +106,58 @@ function createApp(options) {
       }
 
       if (request.method === 'POST' && request.url === '/api/config/validate') {
+        const configService = getConfigService();
         const body = await readJsonBody(request);
         const result = configService.validateText(body.text || '');
         return sendJson(response, result.ok ? 200 : 400, result);
       }
 
+      if (request.method === 'POST' && request.url === '/api/mode') {
+        const body = await readJsonBody(request);
+        const nextMode = body.mode;
+        if (!['sandbox', 'live'].includes(nextMode)) {
+          return sendJson(response, 400, {
+            ok: false,
+            message: 'Mode must be either "sandbox" or "live".'
+          });
+        }
+
+        if (nextMode === 'live') {
+          if (!liveConfigPath) {
+            return sendJson(response, 400, {
+              ok: false,
+              message: 'Live mode is not configured for this dashboard.'
+            });
+          }
+
+          if (!body.confirm) {
+            return sendJson(response, 400, {
+              ok: false,
+              message: 'Live mode confirmation is required.'
+            });
+          }
+        }
+
+        currentMode = nextMode;
+        const modePaths = getModePaths();
+        return sendJson(response, 200, {
+          ok: true,
+          message: `Dashboard mode switched to ${currentMode}.`,
+          currentMode,
+          configPath: modePaths.configPath
+        });
+      }
+
       if (request.method === 'POST' && request.url === '/api/config/primary-model') {
-        if (liveConfigProtected) {
+        const modePaths = getModePaths();
+        if (modePaths.protected) {
           return sendJson(response, 403, {
             ok: false,
             message: 'Live config writes are disabled. Point the dashboard at a sandbox config or explicitly enable live writes after the schema fix is complete.'
           });
         }
 
+        const configService = getConfigService();
         const body = await readJsonBody(request);
         const result = await configService.savePrimaryModel({
           modelId: body.modelId,
@@ -113,13 +191,15 @@ function createApp(options) {
       }
 
       if (request.method === 'POST' && request.url === '/api/config/reset') {
-        if (liveConfigProtected) {
+        const modePaths = getModePaths();
+        if (modePaths.protected) {
           return sendJson(response, 403, {
             ok: false,
             message: 'Live config writes are disabled. Reset is only available when the dashboard is pointed at a sandbox config.'
           });
         }
 
+        const configService = getConfigService();
         const body = await readJsonBody(request);
         if (!body.confirm) {
           return sendJson(response, 400, {
@@ -237,7 +317,16 @@ function createMockRequest({ method, url, headers, body }) {
 function summarizeConfig(config, options = {}) {
   const defaults = config?.agents?.defaults || {};
   const telegram = config?.integrations?.telegram || {};
-  const { configPath = null, liveConfigProtected = false } = options;
+  const {
+    configPath = null,
+    currentMode = 'sandbox',
+    liveAvailable = false,
+    liveWritesEnabled = false
+  } = options;
+  const writeMode =
+    currentMode === 'live'
+      ? (liveWritesEnabled ? 'live-enabled' : 'live-read-only')
+      : 'sandbox-only';
 
   return {
     primaryModel: defaults?.model?.primary || null,
@@ -248,8 +337,23 @@ function summarizeConfig(config, options = {}) {
     telegramChannelConfigured: Boolean(telegram.channelId),
     toolProfile: defaults.toolProfile || null,
     configPath,
-    writeMode: liveConfigProtected ? 'sandbox-only' : 'live-enabled'
+    writeMode,
+    currentMode,
+    liveAvailable,
+    liveWritesEnabled
   };
+}
+
+function determineInitialMode({ initialConfigPath, sandboxConfigPath, liveConfigPath }) {
+  if (initialConfigPath && liveConfigPath && initialConfigPath === liveConfigPath) {
+    return 'live';
+  }
+
+  if (initialConfigPath && sandboxConfigPath && initialConfigPath === sandboxConfigPath) {
+    return 'sandbox';
+  }
+
+  return isProtectedLiveConfigPath(initialConfigPath) ? 'live' : 'sandbox';
 }
 
 function isProtectedLiveConfigPath(configPath) {
@@ -728,6 +832,10 @@ function renderDashboardHtml() {
     </section>
     <section class="overview">
       <article class="metric">
+        <p class="metric-label">Mode</p>
+        <p class="metric-value small" id="mode-badge">Loading...</p>
+      </article>
+      <article class="metric">
         <p class="metric-label">Primary Model</p>
         <p class="metric-value" id="primary-model">Loading...</p>
       </article>
@@ -753,6 +861,22 @@ function renderDashboardHtml() {
       </article>
     </section>
     <section class="grid">
+      <article class="card card-mode">
+        <div class="card-head">
+          <h2>Mode Control</h2>
+          <span class="card-kicker">Sandbox vs Live</span>
+        </div>
+        <p class="meta">Switch the dashboard target between the sandbox config and the live OpenClaw config. Live mode stays read-only until live writes are explicitly enabled.</p>
+        <div id="mode-summary" class="backup-path">
+          <strong>Current Mode</strong>
+          <code id="mode-summary-text">Loading...</code>
+        </div>
+        <div class="actions">
+          <button id="mode-sandbox-button" class="ghost">Use Sandbox</button>
+          <button id="mode-live-button" class="secondary">Use Live</button>
+        </div>
+        <div id="mode-status" class="status"></div>
+      </article>
       <article class="card card-primary">
         <div class="card-head">
           <h2>Primary Model</h2>
@@ -898,6 +1022,9 @@ function renderDashboardHtml() {
       const latestBackupPath = payload.history[0]?.backupPath || 'No backups yet.';
       const latestProbe = payload.probeResults[0];
       const testStatus = payload.testStatus;
+      document.getElementById('mode-badge').textContent = summary.currentMode + ' | ' + summary.writeMode;
+      document.getElementById('mode-summary-text').textContent =
+        summary.currentMode + ' | ' + summary.writeMode + ' | ' + (summary.configPath || 'No config path');
       document.getElementById('latest-backup').textContent = latestBackupPath;
       document.getElementById('latest-backup-path').textContent = latestBackupPath;
       document.getElementById('latest-probe').textContent = latestProbe
@@ -948,6 +1075,8 @@ function renderDashboardHtml() {
           ].join('')
         : '<li class="empty">No regression report has been recorded yet. Run <code>npm run test:regression</code> to populate this panel.</li>';
       document.getElementById('matrix-body').innerHTML = buildMatrixRows(summary.availableConfiguredModels, payload.probeResults);
+      document.getElementById('mode-sandbox-button').disabled = summary.currentMode === 'sandbox';
+      document.getElementById('mode-live-button').disabled = !summary.liveAvailable || summary.currentMode === 'live';
       renderHealth(payload.health);
     }
 
@@ -1113,6 +1242,28 @@ function renderDashboardHtml() {
       }
     }
 
+    async function switchMode(mode) {
+      const body = { mode };
+      if (mode === 'live') {
+        const confirmLive = window.confirm('Switch the dashboard to the live OpenClaw config? Live writes will remain blocked unless they are explicitly enabled.');
+        if (!confirmLive) {
+          return;
+        }
+        body.confirm = true;
+      }
+
+      const response = await fetch('/api/mode', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const payload = await response.json();
+      setMessage('mode-status', payload.message || 'Mode updated.', !response.ok);
+      if (response.ok) {
+        await loadState();
+      }
+    }
+
     async function probeCandidateModels() {
       const modelIds = latestState.summary.toolCapableConfiguredModels || [];
       if (!modelIds.length) {
@@ -1138,6 +1289,8 @@ function renderDashboardHtml() {
       loadState({ announce: true });
     });
     document.getElementById('reset-button').addEventListener('click', resetSandboxConfig);
+    document.getElementById('mode-sandbox-button').addEventListener('click', () => switchMode('sandbox'));
+    document.getElementById('mode-live-button').addEventListener('click', () => switchMode('live'));
     document.getElementById('validate-button').addEventListener('click', validateJson);
     document.getElementById('health-button').addEventListener('click', checkHealth);
     document.getElementById('restart-button').addEventListener('click', restartGateway);

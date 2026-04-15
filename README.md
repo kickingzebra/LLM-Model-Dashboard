@@ -86,6 +86,7 @@ By default, the GEEKOM deployment is now sandbox-only:
 - writes go to `/home/zia-basit/.openclaw/openclaw.sandbox.json`
 - reset restores from `/home/zia-basit/.openclaw/openclaw.sandbox.seed.json`
 - live writes to `/home/zia-basit/.openclaw/openclaw.json` are blocked unless `OPENCLAW_ENABLE_LIVE_WRITES=true` is explicitly set
+- the dashboard UI includes `Use Sandbox` and `Use Live` mode controls; switching to live requires confirmation and stays read-only unless live writes are explicitly enabled
 
 Useful GEEKOM commands:
 
