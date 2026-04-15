@@ -1171,8 +1171,7 @@ function renderDashboardHtml() {
             '<span class="history-action">' + entry.action + '</span>' +
             '<div><strong>' + (entry.previousPrimaryModel || 'none') + '</strong> -> <strong>' + (entry.nextPrimaryModel || 'none') + '</strong></div>' +
             '<span class="history-meta">Backup: ' + (entry.backupPath || 'not recorded') + '</span>' +
-            '<span class="history-meta">When: ' + escapeHtml(entry.timestampIso || entry.timestamp || 'not recorded') + '</span>' +
-            '<span class="history-meta">Stamp: ' + escapeHtml(entry.timestamp || 'not recorded') + '</span>' +
+            '<span class="history-meta">When: ' + escapeHtml(formatAuditTimestamp(entry.timestampIso || entry.timestamp)) + '</span>' +
             '</li>'
           ).join('')
         : '<li class="empty">No changes logged yet.</li>';
@@ -1251,6 +1250,24 @@ function renderDashboardHtml() {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+    }
+
+    function formatAuditTimestamp(value) {
+      if (!value) {
+        return 'not recorded';
+      }
+
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) {
+        return String(value);
+      }
+
+      return date.getUTCFullYear() + '-' +
+        String(date.getUTCMonth() + 1).padStart(2, '0') + '-' +
+        String(date.getUTCDate()).padStart(2, '0') + ' ' +
+        String(date.getUTCHours()).padStart(2, '0') + ':' +
+        String(date.getUTCMinutes()).padStart(2, '0') + ':' +
+        String(date.getUTCSeconds()).padStart(2, '0') + ' UTC';
     }
 
     function renderHealth(health) {
