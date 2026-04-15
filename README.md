@@ -59,6 +59,7 @@ That uses [local-data/openclaw.test.json](/Users/ziabasit/Documents/New project/
 The reset button restores that file from [local-data/openclaw.test.seed.json](/Users/ziabasit/Documents/New project/openclaw-dashboard/local-data/openclaw.test.seed.json).
 Recent sandbox model changes are logged to `local-data/model-history.log.json`.
 Direct Ollama probe results are logged to `local-data/model-probe-results.json`.
+If you set `OPENCLAW_MODEL_LIVE_LOG_PATH`, the dashboard also shows a human-readable Markdown model log.
 
 ## GEEKOM Deploy
 
@@ -160,6 +161,16 @@ After each model change in the sandbox dashboard, the app can run the documented
 - structured tool-call return
 
 The broader OpenClaw confirmation pass from the test matrix is still a second-stage check rather than part of this local dashboard automation.
+
+## Optional Live Log
+
+To surface the Markdown model notebook in the dashboard, set:
+
+```bash
+OPENCLAW_MODEL_LIVE_LOG_PATH=/absolute/path/to/OPENCLAW_MODEL_LIVE_LOG_2026-04-15.md
+```
+
+The dashboard will then load and display the file contents in a dedicated `Live Model Log` panel.
 
 Run the suite with:
 

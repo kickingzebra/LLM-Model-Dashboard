@@ -17,6 +17,7 @@ async function withApp(options = {}) {
   const liveResetSourcePath = path.join(tempDir, 'openclaw.seed.json');
   const auditLogPath = path.join(tempDir, 'model-history.log.json');
   const probeResultsPath = path.join(tempDir, 'model-probe-results.json');
+  const modelLiveLogPath = path.join(tempDir, 'OPENCLAW_MODEL_LIVE_LOG.md');
   const testReportPath = path.join(tempDir, 'test-report.json');
   const liveConfig = options.liveConfig || options.initialConfig || null;
   const configPath = options.startInLiveMode ? liveConfigPath : sandboxConfigPath;
@@ -35,6 +36,9 @@ async function withApp(options = {}) {
     await fs.copyFile(fixturePath, liveConfigPath);
     await fs.copyFile(fixturePath, liveResetSourcePath);
   }
+  if (typeof options.modelLiveLogContent === 'string') {
+    await fs.writeFile(modelLiveLogPath, options.modelLiveLogContent, 'utf8');
+  }
 
   const app = createApp({
     configPath,
@@ -45,6 +49,7 @@ async function withApp(options = {}) {
     liveResetSourcePath,
     auditLogPath,
     probeResultsPath,
+    modelLiveLogPath,
     testReportPath,
     now: () => '20260414T111500',
     ...options
@@ -60,12 +65,14 @@ async function withApp(options = {}) {
     liveResetSourcePath,
     auditLogPath,
     probeResultsPath,
+    modelLiveLogPath,
     testReportPath
   };
 }
 
 test('dashboard state endpoint masks secrets and returns model details', async () => {
   const { app } = await withApp({
+    modelLiveLogContent: '# Live Log\n\n- initial entry\n',
     modelProbeScriptPath: '/tmp/fake-probe.sh',
     fetchImpl: async () =>
       new Response(JSON.stringify({ models: [{ name: 'qwen3:8b' }, { name: 'llama3.2:3b' }] }), {
@@ -94,6 +101,9 @@ test('dashboard state endpoint masks secrets and returns model details', async (
   assert.equal(payload.summary.currentMode, 'sandbox');
   assert.deepEqual(payload.history, []);
   assert.deepEqual(payload.probeResults, []);
+  assert.equal(payload.modelLiveLog.available, true);
+  assert.match(payload.modelLiveLog.path, /OPENCLAW_MODEL_LIVE_LOG\.md$/);
+  assert.match(payload.modelLiveLog.content, /initial entry/);
   assert.equal(payload.testStatus.lastRunAt, null);
 });
 
@@ -238,6 +248,7 @@ TOOLS_SUMMARY=add_numbers {"a":2,"b":2}`,
 test('restart is not triggered accidentally on page load', async () => {
   const calls = [];
   const { app } = await withApp({
+    modelLiveLogContent: '# Live Log\n\n## llama3.2:3b\n',
     runCommand: async (command, args) => {
       calls.push([command, args]);
       return { code: 0, stdout: '', stderr: '' };
@@ -250,6 +261,7 @@ test('restart is not triggered accidentally on page load', async () => {
   assert.equal(response.statusCode, 200);
   assert.match(html, /Restart Gateway/);
   assert.match(html, /Latest Backup/);
+  assert.match(html, /Live Model Log/);
   assert.deepEqual(calls, []);
 });
 

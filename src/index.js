@@ -13,6 +13,7 @@ const liveResetSourcePath = process.env.OPENCLAW_LIVE_RESET_SOURCE_PATH || null;
 const auditLogPath = process.env.OPENCLAW_AUDIT_LOG_PATH || null;
 const modelProbeScriptPath = process.env.OPENCLAW_MODEL_PROBE_SCRIPT_PATH || null;
 const probeResultsPath = process.env.OPENCLAW_PROBE_RESULTS_PATH || null;
+const modelLiveLogPath = process.env.OPENCLAW_MODEL_LIVE_LOG_PATH || null;
 const testReportPath = process.env.OPENCLAW_TEST_REPORT_PATH || null;
 const allowLiveWrites = process.env.OPENCLAW_ENABLE_LIVE_WRITES === 'true';
 const host = process.env.HOST || '127.0.0.1';
@@ -29,6 +30,7 @@ const app = createApp({
   auditLogPath: auditLogPath ? path.resolve(auditLogPath) : null,
   modelProbeScriptPath: modelProbeScriptPath ? path.resolve(modelProbeScriptPath) : null,
   probeResultsPath: probeResultsPath ? path.resolve(probeResultsPath) : null,
+  modelLiveLogPath: modelLiveLogPath ? path.resolve(modelLiveLogPath) : null,
   testReportPath: testReportPath ? path.resolve(testReportPath) : null,
   allowLiveWrites,
   host,
@@ -62,6 +64,9 @@ app
     }
     if (probeResultsPath) {
       console.log(`Using probe results path: ${probeResultsPath}`);
+    }
+    if (modelLiveLogPath) {
+      console.log(`Using model live log path: ${modelLiveLogPath}`);
     }
     if (testReportPath) {
       console.log(`Using test report path: ${testReportPath}`);

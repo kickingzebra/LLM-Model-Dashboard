@@ -6,6 +6,7 @@ function createSystemService({
   runCommand = defaultRunCommand,
   modelProbeScriptPath = null,
   probeResultsPath = null,
+  modelLiveLogPath = null,
   testReportPath = null,
   now = defaultTimestamp,
   openclawHealthUrl = 'http://127.0.0.1:18789/health',
@@ -79,6 +80,34 @@ function createSystemService({
       } catch (error) {
         if (error.code === 'ENOENT') {
           return [];
+        }
+
+        throw error;
+      }
+    },
+    async getModelLiveLog() {
+      if (!modelLiveLogPath) {
+        return {
+          available: false,
+          path: null,
+          content: ''
+        };
+      }
+
+      try {
+        const content = await fs.readFile(modelLiveLogPath, 'utf8');
+        return {
+          available: true,
+          path: modelLiveLogPath,
+          content
+        };
+      } catch (error) {
+        if (error.code === 'ENOENT') {
+          return {
+            available: false,
+            path: modelLiveLogPath,
+            content: ''
+          };
         }
 
         throw error;
