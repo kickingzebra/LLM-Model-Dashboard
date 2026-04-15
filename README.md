@@ -167,7 +167,7 @@ The broader OpenClaw confirmation pass from the test matrix is still a second-st
 To surface the Markdown model notebook in the dashboard, set:
 
 ```bash
-OPENCLAW_MODEL_LIVE_LOG_PATH=/absolute/path/to/OPENCLAW_MODEL_LIVE_LOG_2026-04-15.md
+OPENCLAW_MODEL_LIVE_LOG_PATH=/absolute/path/to/openclaw-dashboard/docs/OPENCLAW_MODEL_LIVE_LOG_2026-04-15.md
 ```
 
 The dashboard will then load and display the file contents in a dedicated `Live Model Log` panel.
