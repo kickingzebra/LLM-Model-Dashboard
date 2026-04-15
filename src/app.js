@@ -1,6 +1,10 @@
 const http = require('node:http');
 
-const { createConfigService } = require('./config-service');
+const {
+  createConfigService,
+  listConfiguredModelIds,
+  listToolCapableConfiguredModels
+} = require('./config-service');
 const { createSystemService } = require('./system-service');
 
 function createApp(options) {
@@ -82,6 +86,20 @@ function createApp(options) {
           saved: result.saved,
           probe
         });
+      }
+
+      if (request.method === 'POST' && request.url === '/api/probe/models') {
+        const body = await readJsonBody(request);
+        const modelIds = Array.isArray(body.modelIds) ? body.modelIds : [];
+        if (modelIds.length === 0) {
+          return sendJson(response, 400, {
+            ok: false,
+            message: 'At least one model is required.'
+          });
+        }
+
+        const probe = await systemService.runModelProbeBatch(modelIds);
+        return sendJson(response, probe.ok ? 200 : 500, probe);
       }
 
       if (request.method === 'POST' && request.url === '/api/config/reset') {
@@ -200,14 +218,14 @@ function createMockRequest({ method, url, headers, body }) {
 }
 
 function summarizeConfig(config) {
-  const catalog = config?.models?.providers?.ollama?.models || {};
   const defaults = config?.agents?.defaults || {};
   const telegram = config?.integrations?.telegram || {};
 
   return {
     primaryModel: defaults?.model?.primary || null,
     activeModels: defaults?.models || {},
-    availableConfiguredModels: Object.keys(catalog),
+    availableConfiguredModels: listConfiguredModelIds(config),
+    toolCapableConfiguredModels: listToolCapableConfiguredModels(config),
     telegramEnabled: Boolean(telegram.enabled),
     telegramChannelConfigured: Boolean(telegram.channelId),
     toolProfile: defaults.toolProfile || null
@@ -804,6 +822,9 @@ function renderDashboardHtml() {
           <span class="card-kicker">Model capability plan</span>
         </div>
         <p class="meta">This mirrors the documented approach from <code>OPENCLAW_MODEL_TOOL_TEST_MATRIX_2026-04-13.md</code>. The dashboard can fill in the direct Ollama capability checks from the probe script. The broader OpenClaw agent confirmation pass is still a second-stage check.</p>
+        <div class="actions">
+          <button id="probe-candidates-button">Probe Tool-Capable Candidates</button>
+        </div>
         <div class="matrix-wrap">
           <table class="matrix-table">
             <thead>
@@ -859,6 +880,7 @@ function renderDashboardHtml() {
       document.getElementById('validation-input').value = JSON.stringify(payload.config, null, 2);
       document.getElementById('config-summary').innerHTML = [
         '<li><strong>Configured models:</strong> ' + summary.availableConfiguredModels.join(', ') + '</li>',
+        '<li><strong>Tool-capable configured models:</strong> ' + (summary.toolCapableConfiguredModels.join(', ') || 'None marked yet') + '</li>',
         '<li><strong>Installed models:</strong> ' + (payload.installedModels.join(', ') || 'None detected') + '</li>',
         '<li><strong>Telegram enabled:</strong> ' + (summary.telegramEnabled ? 'Yes' : 'No') + '</li>',
         '<li><strong>Telegram channel configured:</strong> ' + (summary.telegramChannelConfigured ? 'Yes' : 'No') + '</li>',
@@ -1045,6 +1067,26 @@ function renderDashboardHtml() {
       }
     }
 
+    async function probeCandidateModels() {
+      const modelIds = latestState.summary.toolCapableConfiguredModels || [];
+      if (!modelIds.length) {
+        setMessage('save-status', 'No configured models are currently marked as tool-capable.', true);
+        return;
+      }
+
+      setMessage('save-status', 'Running direct Ollama probes for: ' + modelIds.join(', '));
+      const response = await fetch('/api/probe/models', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ modelIds })
+      });
+      const payload = await response.json();
+      setMessage('save-status', payload.message || 'Probe run completed.', !response.ok);
+      if (response.ok) {
+        await loadState();
+      }
+    }
+
     document.getElementById('save-button').addEventListener('click', savePrimaryModel);
     document.getElementById('refresh-button').addEventListener('click', () => {
       loadState({ announce: true });
@@ -1053,6 +1095,7 @@ function renderDashboardHtml() {
     document.getElementById('validate-button').addEventListener('click', validateJson);
     document.getElementById('health-button').addEventListener('click', checkHealth);
     document.getElementById('restart-button').addEventListener('click', restartGateway);
+    document.getElementById('probe-candidates-button').addEventListener('click', probeCandidateModels);
     loadState().catch((error) => setMessage('save-status', error.message, true));
   </script>
 </body>

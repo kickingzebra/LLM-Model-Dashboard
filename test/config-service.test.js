@@ -8,7 +8,9 @@ const {
   createConfigService,
   validateConfigText,
   switchPrimaryModel,
-  maskSecrets
+  maskSecrets,
+  listConfiguredModelIds,
+  listToolCapableConfiguredModels
 } = require('../src/config-service');
 
 async function createTempConfigFixture() {
@@ -73,6 +75,69 @@ test('can insert a missing model into the ollama catalog while switching', () =>
 
   assert.equal(updated.agents.defaults.model.primary, 'gemma3:12b');
   assert.equal(updated.models.providers.ollama.models['gemma3:12b'].notes, 'chat-only');
+});
+
+test('array-based model catalogs return real model ids instead of numeric indexes', () => {
+  const config = {
+    models: {
+      providers: {
+        ollama: {
+          models: [
+            { name: 'llama3.2:3b', compat: { supportsTools: true } },
+            { name: 'qwen3:8b', compat: { supportsTools: true } },
+            { name: 'gemma3:12b', compat: { supportsTools: false } }
+          ]
+        }
+      }
+    }
+  };
+
+  assert.deepEqual(listConfiguredModelIds(config), ['llama3.2:3b', 'qwen3:8b', 'gemma3:12b']);
+  assert.deepEqual(listToolCapableConfiguredModels(config), ['llama3.2:3b', 'qwen3:8b']);
+});
+
+test('switching the primary model works when the config catalog is an array', () => {
+  const config = {
+    agents: {
+      defaults: {
+        model: {
+          provider: 'ollama',
+          primary: 'llama3.2:3b'
+        },
+        models: {
+          primary: {
+            provider: 'ollama',
+            model: 'llama3.2:3b'
+          },
+          chat: {
+            provider: 'ollama',
+            model: 'llama3.2:3b'
+          }
+        },
+        routing: {
+          provider: 'ollama',
+          primaryModel: 'llama3.2:3b'
+        }
+      }
+    },
+    models: {
+      providers: {
+        ollama: {
+          models: [
+            { name: 'llama3.2:3b', compat: { supportsTools: true } },
+            { name: 'qwen3:8b', compat: { supportsTools: true } }
+          ]
+        }
+      }
+    }
+  };
+
+  const updated = switchPrimaryModel(config, { modelId: 'qwen3:8b' });
+
+  assert.equal(updated.agents.defaults.model.primary, 'qwen3:8b');
+  assert.equal(updated.agents.defaults.models.primary.model, 'qwen3:8b');
+  assert.equal(updated.agents.defaults.models.chat.model, 'llama3.2:3b');
+  assert.equal(updated.agents.defaults.routing.primaryModel, 'qwen3:8b');
 });
 
 test('saving creates a backup before writing the updated config', async () => {

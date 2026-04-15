@@ -10,6 +10,78 @@ function getOllamaCatalog(config) {
   return catalog;
 }
 
+function getCatalogModelId(entry) {
+  if (typeof entry === 'string') {
+    return entry;
+  }
+
+  if (!entry || typeof entry !== 'object') {
+    return null;
+  }
+
+  return entry.id || entry.name || entry.model || null;
+}
+
+function listConfiguredModelIds(config) {
+  const catalog = getOllamaCatalog(config);
+
+  if (Array.isArray(catalog)) {
+    return catalog
+      .map(getCatalogModelId)
+      .filter(Boolean);
+  }
+
+  return Object.keys(catalog);
+}
+
+function getCatalogEntry(config, modelId) {
+  const catalog = getOllamaCatalog(config);
+
+  if (Array.isArray(catalog)) {
+    return catalog.find((entry) => getCatalogModelId(entry) === modelId) || null;
+  }
+
+  return catalog[modelId] || null;
+}
+
+function upsertCatalogEntry(config, modelId, catalogEntry) {
+  const catalog = getOllamaCatalog(config);
+
+  if (Array.isArray(catalog)) {
+    const existingIndex = catalog.findIndex((entry) => getCatalogModelId(entry) === modelId);
+    const normalizedEntry =
+      catalogEntry && typeof catalogEntry === 'object'
+        ? { name: modelId, ...catalogEntry }
+        : { name: modelId };
+
+    if (existingIndex === -1) {
+      catalog.push(normalizedEntry);
+      return normalizedEntry;
+    }
+
+    catalog[existingIndex] = {
+      ...catalog[existingIndex],
+      ...normalizedEntry
+    };
+    return catalog[existingIndex];
+  }
+
+  catalog[modelId] = catalogEntry;
+  return catalog[modelId];
+}
+
+function listToolCapableConfiguredModels(config) {
+  const catalog = getOllamaCatalog(config);
+  const entries = Array.isArray(catalog)
+    ? catalog
+    : Object.entries(catalog).map(([id, entry]) => ({ name: id, ...entry }));
+
+  return entries
+    .filter((entry) => entry?.compat?.supportsTools === true)
+    .map((entry) => getCatalogModelId(entry))
+    .filter(Boolean);
+}
+
 function validateConfigText(text) {
   try {
     const parsed = JSON.parse(text);
@@ -27,14 +99,14 @@ function validateConfigText(text) {
 
 function switchPrimaryModel(config, options) {
   const { modelId, addToCatalog = false, catalogEntry = null } = options;
-  const catalog = getOllamaCatalog(config);
+  const existingCatalogEntry = getCatalogEntry(config, modelId);
 
-  if (!catalog[modelId]) {
+  if (!existingCatalogEntry) {
     if (!addToCatalog || !catalogEntry) {
       throw new Error(`Model "${modelId}" is not configured in models.providers.ollama.models`);
     }
 
-    catalog[modelId] = catalogEntry;
+    upsertCatalogEntry(config, modelId, catalogEntry);
   }
 
   if (!config.agents) {
@@ -260,5 +332,7 @@ module.exports = {
   createConfigService,
   validateConfigText,
   switchPrimaryModel,
-  maskSecrets
+  maskSecrets,
+  listConfiguredModelIds,
+  listToolCapableConfiguredModels
 };

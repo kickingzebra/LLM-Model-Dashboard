@@ -14,8 +14,13 @@ async function withApp(options = {}) {
   const auditLogPath = path.join(tempDir, 'model-history.log.json');
   const probeResultsPath = path.join(tempDir, 'model-probe-results.json');
   const testReportPath = path.join(tempDir, 'test-report.json');
-  await fs.copyFile(fixturePath, configPath);
-  await fs.copyFile(fixturePath, resetSourcePath);
+  if (options.initialConfig) {
+    await fs.writeFile(configPath, `${JSON.stringify(options.initialConfig, null, 2)}\n`, 'utf8');
+    await fs.writeFile(resetSourcePath, `${JSON.stringify(options.initialConfig, null, 2)}\n`, 'utf8');
+  } else {
+    await fs.copyFile(fixturePath, configPath);
+    await fs.copyFile(fixturePath, resetSourcePath);
+  }
 
   const app = createApp({
     configPath,
@@ -56,6 +61,7 @@ test('dashboard state endpoint masks secrets and returns model details', async (
   assert.equal(response.statusCode, 200);
   assert.equal(payload.config.gateway.authToken.includes('super-secret-auth-token'), false);
   assert.deepEqual(payload.installedModels, ['qwen3:8b', 'llama3.2:3b']);
+  assert.deepEqual(payload.summary.toolCapableConfiguredModels, ['llama3.2:3b', 'qwen3:8b', 'llama3.1:8b']);
   assert.deepEqual(payload.history, []);
   assert.deepEqual(payload.probeResults, []);
   assert.equal(payload.testStatus.lastRunAt, null);
@@ -203,6 +209,111 @@ test('dashboard state returns recent model history entries', async () => {
   assert.equal(payload.history[0].nextPrimaryModel, 'qwen3:8b');
 });
 
+test('dashboard state uses real model names for array-based catalogs', async () => {
+  const initialConfig = {
+    gateway: {
+      host: '127.0.0.1',
+      port: 18789,
+      authToken: 'super-secret-auth-token'
+    },
+    agents: {
+      defaults: {
+        model: {
+          provider: 'ollama',
+          primary: 'nemotron-mini:4b'
+        },
+        models: {
+          primary: {
+            provider: 'ollama',
+            model: 'nemotron-mini:4b'
+          },
+          chat: {
+            provider: 'ollama',
+            model: 'llama3.2:3b'
+          }
+        },
+        routing: {
+          provider: 'ollama',
+          primaryModel: 'nemotron-mini:4b'
+        },
+        toolProfile: 'minimal'
+      }
+    },
+    models: {
+      providers: {
+        ollama: {
+          models: [
+            { name: 'llama3.2:3b', compat: { supportsTools: true } },
+            { name: 'qwen3:8b', compat: { supportsTools: true } },
+            { name: 'nemotron-mini:4b', compat: { supportsTools: false } }
+          ]
+        }
+      }
+    },
+    integrations: {
+      telegram: {
+        enabled: true,
+        botToken: '123456:telegram-secret',
+        channelId: '-10012345'
+      }
+    }
+  };
+
+  const { app } = await withApp({ initialConfig });
+  const response = await app.inject({ url: '/api/state' });
+  const payload = response.json();
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(payload.summary.availableConfiguredModels, [
+    'llama3.2:3b',
+    'qwen3:8b',
+    'nemotron-mini:4b'
+  ]);
+  assert.deepEqual(payload.summary.toolCapableConfiguredModels, [
+    'llama3.2:3b',
+    'qwen3:8b'
+  ]);
+});
+
+test('batch probe endpoint runs the documented capability check for multiple models', async () => {
+  const calls = [];
+  const { app } = await withApp({
+    modelProbeScriptPath: '/tmp/fake-probe.sh',
+    runCommand: async (command, args) => {
+      if (command === '/bin/bash') {
+        calls.push(args[1]);
+        return {
+          code: 0,
+          stdout: `-----
+MODEL=${args[1]}
+CHAT_HTTP=200
+CHAT_OK=yes
+CHAT_SUMMARY=CHAT_OK
+TOOLS_HTTP=200
+TOOLS_OUTCOME=tool_calls_returned
+TOOLS_SUMMARY=add_numbers {"a":2,"b":2}`,
+          stderr: ''
+        };
+      }
+
+      return { code: 0, stdout: '', stderr: '' };
+    }
+  });
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/probe/models',
+    headers: { 'content-type': 'application/json' },
+    body: { modelIds: ['qwen3:8b', 'llama3.1:8b'] }
+  });
+  const payload = response.json();
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.entries.length, 2);
+  assert.deepEqual(calls, ['qwen3:8b', 'llama3.1:8b']);
+});
+
 test('dashboard state returns the latest regression test summary when present', async () => {
   const { app, testReportPath } = await withApp();
   await fs.writeFile(
@@ -238,4 +349,5 @@ test('dashboard page includes a TDD test status section', async () => {
   assert.equal(response.statusCode, 200);
   assert.match(response.body, /TDD Test Status/);
   assert.match(response.body, /Documented Test Matrix/);
+  assert.match(response.body, /Probe Tool-Capable Candidates/);
 });
