@@ -158,9 +158,31 @@ function updateModelReference(existingValue, modelId) {
   return existingValue;
 }
 
+function switchPrimaryModelMapKey(modelsMap, previousModelId, nextModelId) {
+  if (!modelsMap || typeof modelsMap !== 'object' || Array.isArray(modelsMap)) {
+    return;
+  }
+
+  const keys = Object.keys(modelsMap);
+  const previousProviderRef = previousModelId ? buildProviderModelRef(previousModelId) : null;
+  const nextProviderRef = buildProviderModelRef(nextModelId);
+  const matchingKey =
+    keys.find((key) => key === previousProviderRef || key === previousModelId) ||
+    (keys.length === 1 && keys[0].includes('/') ? keys[0] : null);
+
+  if (!matchingKey || matchingKey === nextProviderRef || matchingKey === nextModelId) {
+    return;
+  }
+
+  const currentValue = modelsMap[matchingKey];
+  delete modelsMap[matchingKey];
+  modelsMap[nextProviderRef] = currentValue;
+}
+
 function switchPrimaryModel(config, options) {
   const { modelId, addToCatalog = false, catalogEntry = null } = options;
   const existingCatalogEntry = getCatalogEntry(config, modelId);
+  const previousPrimaryModelId = getPrimaryModelId(config);
 
   if (!existingCatalogEntry) {
     if (!addToCatalog || !catalogEntry) {
@@ -204,6 +226,8 @@ function switchPrimaryModel(config, options) {
       provider: 'ollama',
       model: modelId
     };
+  } else {
+    switchPrimaryModelMapKey(config.agents.defaults.models, previousPrimaryModelId, modelId);
   }
 
   if (config.agents.defaults.routing && typeof config.agents.defaults.routing === 'object') {
@@ -214,6 +238,64 @@ function switchPrimaryModel(config, options) {
   }
 
   return config;
+}
+
+function getConfiguredActiveModelIds(config) {
+  const models = config?.agents?.defaults?.models;
+  if (!models || typeof models !== 'object' || Array.isArray(models)) {
+    return [];
+  }
+
+  if ('primary' in models) {
+    const primaryId = getPrimaryModelId({
+      agents: {
+        defaults: {
+          model: models.primary
+        }
+      }
+    });
+    return primaryId ? [primaryId] : [];
+  }
+
+  return Object.keys(models)
+    .filter((key) => key.includes('/'))
+    .map((key) => key.split('/').slice(1).join('/'));
+}
+
+function assertPrimaryModelConsistency(config, expectedModelId) {
+  const primaryModelId = getPrimaryModelId(config);
+  if (primaryModelId !== expectedModelId) {
+    throw new Error(
+      `Primary model write was inconsistent. Expected ${expectedModelId} but found ${primaryModelId || 'none'}.`
+    );
+  }
+
+  const activeModelIds = getConfiguredActiveModelIds(config);
+  if (activeModelIds.length > 0 && !activeModelIds.includes(expectedModelId)) {
+    throw new Error(
+      `Configured active models were not updated consistently. Expected ${expectedModelId} in ${activeModelIds.join(', ')}.`
+    );
+  }
+
+  const routedPrimaryModel = config?.agents?.defaults?.routing?.primaryModel;
+  if (routedPrimaryModel && routedPrimaryModel !== expectedModelId) {
+    throw new Error(
+      `Routing primary model was not updated consistently. Expected ${expectedModelId} but found ${routedPrimaryModel}.`
+    );
+  }
+}
+
+function toIsoTimestamp(value) {
+  if (typeof value !== 'string' || value.length === 0) {
+    return null;
+  }
+
+  if (/^\d{8}T\d{6}Z?$/.test(value)) {
+    return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}T${value.slice(9, 11)}:${value.slice(11, 13)}:${value.slice(13, 15)}Z`;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString().replace('.000Z', 'Z');
 }
 
 function maskValue(value) {
@@ -318,8 +400,10 @@ function createConfigService({
 
     const backupPath = await createBackup();
     await fs.writeFile(configPath, `${validation.formatted}\n`, 'utf8');
+    const timestamp = now();
     await appendHistory({
-      timestamp: now(),
+      timestamp,
+      timestampIso: toIsoTimestamp(timestamp),
       action: 'resetConfig',
       previousPrimaryModel: getPrimaryModelId(currentConfig),
       nextPrimaryModel: getPrimaryModelId(JSON.parse(validation.formatted)),
@@ -359,6 +443,7 @@ function createConfigService({
       const config = await loadConfig();
       const previousPrimaryModel = getPrimaryModelId(config);
       const updated = switchPrimaryModel(config, options);
+      assertPrimaryModelConsistency(updated, options.modelId);
       const text = JSON.stringify(updated, null, 2);
       const validation = validateConfigText(text);
       if (!validation.ok) {
@@ -367,8 +452,10 @@ function createConfigService({
 
       const backupPath = await createBackup();
       await fs.writeFile(configPath, `${validation.formatted}\n`, 'utf8');
+      const timestamp = now();
       await appendHistory({
-        timestamp: now(),
+        timestamp,
+        timestampIso: toIsoTimestamp(timestamp),
         action: 'savePrimaryModel',
         previousPrimaryModel,
         nextPrimaryModel: options.modelId,

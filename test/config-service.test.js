@@ -238,6 +238,44 @@ test('saving preserves live-style string references on disk', async () => {
   assert.equal('routing' in written.agents.defaults, false);
 });
 
+test('saving preserves live-style active model maps on disk', async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openclaw-dashboard-live-map-'));
+  const configPath = path.join(tempDir, 'openclaw.json');
+  const config = {
+    agents: {
+      defaults: {
+        model: {
+          primary: 'ollama/llama3.2:3b'
+        },
+        models: {
+          'ollama/llama3.2:3b': {}
+        },
+        workspace: '/home/zia-basit/.openclaw/workspace'
+      }
+    },
+    models: {
+      providers: {
+        ollama: {
+          models: {
+            'llama3.2:3b': { compat: { supportsTools: true } },
+            'qwen3:8b': { compat: { supportsTools: true } }
+          }
+        }
+      }
+    }
+  };
+  await fs.writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+  const service = createConfigService({ configPath, now: () => '20260415T191500' });
+
+  await service.savePrimaryModel({ modelId: 'qwen3:8b' });
+  const written = JSON.parse(await fs.readFile(configPath, 'utf8'));
+
+  assert.equal(written.agents.defaults.model.primary, 'ollama/qwen3:8b');
+  assert.deepEqual(written.agents.defaults.models, {
+    'ollama/qwen3:8b': {}
+  });
+});
+
 test('resetting the config restores the seed copy and creates a backup first', async () => {
   const { configPath, tempDir } = await createTempConfigFixture();
   const seedPath = path.join(tempDir, 'openclaw.seed.json');
@@ -282,10 +320,28 @@ test('saving and resetting append model audit entries to the history log', async
 
   assert.equal(history.entries.length, 2);
   assert.equal(history.entries[0].action, 'resetConfig');
+  assert.equal(history.entries[0].timestampIso, '2026-04-14T12:15:00Z');
   assert.equal(history.entries[0].previousPrimaryModel, 'qwen3:8b');
   assert.equal(history.entries[0].nextPrimaryModel, 'llama3.2:3b');
   assert.equal(history.entries[1].action, 'savePrimaryModel');
+  assert.equal(history.entries[1].timestampIso, '2026-04-14T12:15:00Z');
   assert.equal(history.entries[1].nextPrimaryModel, 'qwen3:8b');
+});
+
+test('saving records an ISO timestamp for exact model-change review', async () => {
+  const { configPath, tempDir } = await createTempConfigFixture();
+  const auditLogPath = path.join(tempDir, 'model-history.log.json');
+  const service = createConfigService({
+    configPath,
+    auditLogPath,
+    now: () => '20260415T191500Z'
+  });
+
+  await service.savePrimaryModel({ modelId: 'qwen3:8b' });
+  const history = JSON.parse(await fs.readFile(auditLogPath, 'utf8'));
+
+  assert.equal(history.entries[0].timestamp, '20260415T191500Z');
+  assert.equal(history.entries[0].timestampIso, '2026-04-15T19:15:00Z');
 });
 
 test('invalid JSON is rejected before any write', async () => {

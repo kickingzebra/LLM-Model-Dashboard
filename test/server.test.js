@@ -95,6 +95,7 @@ test('dashboard state endpoint masks secrets and returns model details', async (
   const payload = response.json();
 
   assert.equal(response.statusCode, 200);
+  assert.equal(response.headers['cache-control'], 'no-store');
   assert.equal(payload.config.gateway.authToken.includes('super-secret-auth-token'), false);
   assert.deepEqual(payload.installedModels, ['qwen3:8b', 'llama3.2:3b']);
   assert.deepEqual(payload.summary.toolCapableConfiguredModels, ['llama3.2:3b', 'qwen3:8b', 'llama3.1:8b']);
@@ -105,6 +106,16 @@ test('dashboard state endpoint masks secrets and returns model details', async (
   assert.match(payload.modelLiveLog.path, /OPENCLAW_MODEL_LIVE_LOG\.md$/);
   assert.match(payload.modelLiveLog.content, /initial entry/);
   assert.equal(payload.testStatus.lastRunAt, null);
+});
+
+test('dashboard page is served with no-store cache headers', async () => {
+  const { app } = await withApp();
+
+  const response = await app.inject({ url: '/' });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers['cache-control'], 'no-store');
+  assert.match(response.body, /Mode Control/);
 });
 
 test('mode switch endpoint swaps between sandbox and live config views', async () => {
@@ -472,6 +483,7 @@ test('dashboard state returns the latest regression test summary when present', 
   assert.equal(response.statusCode, 200);
   assert.equal(payload.testStatus.overallStatus, 'passed');
   assert.equal(payload.testStatus.passedCount, 21);
+  assert.equal(payload.testStatus.lastRunAtIso, '2026-04-14T17:30:00Z');
   assert.equal(payload.testStatus.suites[1].name, 'Smoke');
 });
 
@@ -484,4 +496,6 @@ test('dashboard page includes a TDD test status section', async () => {
   assert.match(response.body, /TDD Test Status/);
   assert.match(response.body, /Documented Test Matrix/);
   assert.match(response.body, /Probe Tool-Capable Candidates/);
+  assert.match(response.body, /formatAuditTimestamp\(entry\.timestampIso \|\| entry\.timestamp\)/);
+  assert.match(response.body, /formatAuditTimestamp\(testStatus\.lastRunAtIso \|\| testStatus\.lastRunAt\)/);
 });

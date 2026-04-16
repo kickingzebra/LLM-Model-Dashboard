@@ -123,6 +123,7 @@ function createSystemService({
         const parsed = JSON.parse(text);
         return {
           lastRunAt: parsed.lastRunAt || null,
+          lastRunAtIso: toIsoTimestamp(parsed.lastRunAt),
           overallStatus: parsed.overallStatus || 'unknown',
           suiteCount: parsed.suiteCount || 0,
           passedCount: parsed.passedCount || 0,
@@ -157,8 +158,10 @@ function createSystemService({
         };
       }
 
+      const timestamp = now();
       const entries = parseModelProbeOutput(result.stdout).map((entry) => ({
-        timestamp: now(),
+        timestamp,
+        timestampIso: toIsoTimestamp(timestamp),
         ...entry
       }));
 
@@ -217,6 +220,7 @@ function createSystemService({
 function emptyTestStatus() {
   return {
     lastRunAt: null,
+    lastRunAtIso: null,
     overallStatus: 'not_run',
     suiteCount: 0,
     passedCount: 0,
@@ -254,6 +258,19 @@ function parseModelProbeOutput(stdout) {
       toolsSummary: map.TOOLS_SUMMARY || ''
     };
   });
+}
+
+function toIsoTimestamp(value) {
+  if (typeof value !== 'string' || value.length === 0) {
+    return null;
+  }
+
+  if (/^\d{8}T\d{6}Z?$/.test(value)) {
+    return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}T${value.slice(9, 11)}:${value.slice(11, 13)}:${value.slice(13, 15)}Z`;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString().replace('.000Z', 'Z');
 }
 
 async function fetchJson(fetchImpl, url, label) {

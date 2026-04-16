@@ -1171,7 +1171,7 @@ function renderDashboardHtml() {
             '<span class="history-action">' + entry.action + '</span>' +
             '<div><strong>' + (entry.previousPrimaryModel || 'none') + '</strong> -> <strong>' + (entry.nextPrimaryModel || 'none') + '</strong></div>' +
             '<span class="history-meta">Backup: ' + (entry.backupPath || 'not recorded') + '</span>' +
-            '<span class="history-meta">Timestamp: ' + entry.timestamp + '</span>' +
+            '<span class="history-meta">When: ' + escapeHtml(formatAuditTimestamp(entry.timestampIso || entry.timestamp)) + '</span>' +
             '</li>'
           ).join('')
         : '<li class="empty">No changes logged yet.</li>';
@@ -1189,13 +1189,13 @@ function renderDashboardHtml() {
             '<div><strong>Tools:</strong> ' + entry.toolsOutcome + ' (' + entry.toolsHttp + ')</div>' +
             '<div><strong>Chat Summary:</strong> ' + entry.chatSummary + '</div>' +
             '<div><strong>Tools Summary:</strong> ' + entry.toolsSummary + '</div>' +
-            '<span class="history-meta">Timestamp: ' + entry.timestamp + '</span>' +
+            '<span class="history-meta">Timestamp: ' + escapeHtml(formatAuditTimestamp(entry.timestampIso || entry.timestamp)) + '</span>' +
             '</li>'
           ).join('')
         : '<li class="empty">No probe results logged yet.</li>';
       document.getElementById('test-summary-list').innerHTML = testStatus.lastRunAt
         ? [
-            '<li><strong>Last run:</strong> ' + testStatus.lastRunAt + '</li>',
+            '<li><strong>Last run:</strong> ' + escapeHtml(formatAuditTimestamp(testStatus.lastRunAtIso || testStatus.lastRunAt)) + '</li>',
             '<li><strong>Overall status:</strong> ' + testStatus.overallStatus + '</li>',
             '<li><strong>Suites:</strong> ' + testStatus.suiteCount + ' | <strong>Passed:</strong> ' + testStatus.passedCount + ' | <strong>Failed:</strong> ' + testStatus.failedCount + '</li>',
             '<li><strong>Suite detail:</strong> ' + testStatus.suites.map((suite) => suite.name + ' (' + suite.status + ')').join(', ') + '</li>'
@@ -1245,11 +1245,29 @@ function renderDashboardHtml() {
 
     function escapeHtml(value) {
       return String(value)
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#39;');
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function formatAuditTimestamp(value) {
+      if (!value) {
+        return 'not recorded';
+      }
+
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) {
+        return String(value);
+      }
+
+      return date.getUTCFullYear() + '-' +
+        String(date.getUTCMonth() + 1).padStart(2, '0') + '-' +
+        String(date.getUTCDate()).padStart(2, '0') + ' ' +
+        String(date.getUTCHours()).padStart(2, '0') + ':' +
+        String(date.getUTCMinutes()).padStart(2, '0') + ':' +
+        String(date.getUTCSeconds()).padStart(2, '0') + ' UTC';
     }
 
     function renderHealth(health) {
@@ -1429,12 +1447,18 @@ function renderDashboardHtml() {
 }
 
 function sendHtml(response, html) {
-  response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+  response.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-store'
+  });
   response.end(html);
 }
 
 function sendJson(response, statusCode, payload) {
-  response.writeHead(statusCode, { 'content-type': 'application/json; charset=utf-8' });
+  response.writeHead(statusCode, {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store'
+  });
   response.end(JSON.stringify(payload));
 }
 
