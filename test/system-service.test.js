@@ -134,8 +134,10 @@ TOOLS_SUMMARY=add_numbers {"a":2,"b":2}`,
 
   assert.equal(result.ok, true);
   assert.equal(result.entries[0].model, 'qwen3:8b');
+  assert.equal(result.entries[0].timestampIso, '2026-04-14T17:00:00Z');
   assert.equal(saved.entries[0].toolsOutcome, 'tool_calls_returned');
   assert.equal(saved.entries[0].timestamp, '20260414T170000');
+  assert.equal(saved.entries[0].timestampIso, '2026-04-14T17:00:00Z');
 });
 
 test('runModelProbeBatch probes each requested model once', async () => {
@@ -169,4 +171,31 @@ TOOLS_SUMMARY=add_numbers {"a":2,"b":2}`,
     ['/bin/bash', ['/tmp/fake-probe.sh', 'qwen3:8b']],
     ['/bin/bash', ['/tmp/fake-probe.sh', 'llama3.1:8b']]
   ]);
+});
+
+test('getTestStatus normalizes legacy and ISO timestamps for display', async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openclaw-test-status-'));
+  const testReportPath = path.join(tempDir, 'test-report.json');
+  await fs.writeFile(
+    testReportPath,
+    `${JSON.stringify({
+      lastRunAt: '20260414T173000Z',
+      overallStatus: 'passed',
+      suiteCount: 2,
+      passedCount: 2,
+      failedCount: 0,
+      suites: [
+        { name: 'Unit', status: 'passed' },
+        { name: 'Smoke', status: 'passed' }
+      ]
+    }, null, 2)}\n`,
+    'utf8'
+  );
+
+  const service = createSystemService({ testReportPath });
+  const result = await service.getTestStatus();
+
+  assert.equal(result.lastRunAt, '20260414T173000Z');
+  assert.equal(result.lastRunAtIso, '2026-04-14T17:30:00Z');
+  assert.equal(result.overallStatus, 'passed');
 });

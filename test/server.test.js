@@ -483,6 +483,7 @@ test('dashboard state returns the latest regression test summary when present', 
   assert.equal(response.statusCode, 200);
   assert.equal(payload.testStatus.overallStatus, 'passed');
   assert.equal(payload.testStatus.passedCount, 21);
+  assert.equal(payload.testStatus.lastRunAtIso, '2026-04-14T17:30:00Z');
   assert.equal(payload.testStatus.suites[1].name, 'Smoke');
 });
 
@@ -495,4 +496,6 @@ test('dashboard page includes a TDD test status section', async () => {
   assert.match(response.body, /TDD Test Status/);
   assert.match(response.body, /Documented Test Matrix/);
   assert.match(response.body, /Probe Tool-Capable Candidates/);
+  assert.match(response.body, /formatAuditTimestamp\(entry\.timestampIso \|\| entry\.timestamp\)/);
+  assert.match(response.body, /formatAuditTimestamp\(testStatus\.lastRunAtIso \|\| testStatus\.lastRunAt\)/);
 });

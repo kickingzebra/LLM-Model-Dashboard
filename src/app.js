@@ -1189,13 +1189,13 @@ function renderDashboardHtml() {
             '<div><strong>Tools:</strong> ' + entry.toolsOutcome + ' (' + entry.toolsHttp + ')</div>' +
             '<div><strong>Chat Summary:</strong> ' + entry.chatSummary + '</div>' +
             '<div><strong>Tools Summary:</strong> ' + entry.toolsSummary + '</div>' +
-            '<span class="history-meta">Timestamp: ' + entry.timestamp + '</span>' +
+            '<span class="history-meta">Timestamp: ' + escapeHtml(formatAuditTimestamp(entry.timestampIso || entry.timestamp)) + '</span>' +
             '</li>'
           ).join('')
         : '<li class="empty">No probe results logged yet.</li>';
       document.getElementById('test-summary-list').innerHTML = testStatus.lastRunAt
         ? [
-            '<li><strong>Last run:</strong> ' + testStatus.lastRunAt + '</li>',
+            '<li><strong>Last run:</strong> ' + escapeHtml(formatAuditTimestamp(testStatus.lastRunAtIso || testStatus.lastRunAt)) + '</li>',
             '<li><strong>Overall status:</strong> ' + testStatus.overallStatus + '</li>',
             '<li><strong>Suites:</strong> ' + testStatus.suiteCount + ' | <strong>Passed:</strong> ' + testStatus.passedCount + ' | <strong>Failed:</strong> ' + testStatus.failedCount + '</li>',
             '<li><strong>Suite detail:</strong> ' + testStatus.suites.map((suite) => suite.name + ' (' + suite.status + ')').join(', ') + '</li>'
