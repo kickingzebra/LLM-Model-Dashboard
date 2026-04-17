@@ -1,5 +1,6 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { toIsoTimestamp } = require('./utils');
 
 function getOllamaCatalog(config) {
   const catalog = config?.models?.providers?.ollama?.models;
@@ -80,6 +81,28 @@ function listToolCapableConfiguredModels(config) {
     .filter((entry) => entry?.compat?.supportsTools === true)
     .map((entry) => getCatalogModelId(entry))
     .filter(Boolean);
+}
+
+function getModelContextWindows(config) {
+  const catalog = getOllamaCatalog(config);
+  const result = {};
+
+  if (Array.isArray(catalog)) {
+    for (const entry of catalog) {
+      const id = getCatalogModelId(entry);
+      if (id && entry.contextWindow) {
+        result[id] = entry.contextWindow;
+      }
+    }
+  } else {
+    for (const [id, entry] of Object.entries(catalog)) {
+      if (entry && typeof entry === 'object' && entry.contextWindow) {
+        result[id] = entry.contextWindow;
+      }
+    }
+  }
+
+  return result;
 }
 
 function validateConfigText(text) {
@@ -285,19 +308,6 @@ function assertPrimaryModelConsistency(config, expectedModelId) {
   }
 }
 
-function toIsoTimestamp(value) {
-  if (typeof value !== 'string' || value.length === 0) {
-    return null;
-  }
-
-  if (/^\d{8}T\d{6}Z?$/.test(value)) {
-    return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}T${value.slice(9, 11)}:${value.slice(11, 13)}:${value.slice(13, 15)}Z`;
-  }
-
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString().replace('.000Z', 'Z');
-}
-
 function maskValue(value) {
   if (typeof value !== 'string' || value.length === 0) {
     return '***';
@@ -491,5 +501,6 @@ module.exports = {
   switchPrimaryModel,
   maskSecrets,
   listConfiguredModelIds,
-  listToolCapableConfiguredModels
+  listToolCapableConfiguredModels,
+  getModelContextWindows
 };

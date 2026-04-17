@@ -499,3 +499,325 @@ test('dashboard page includes a TDD test status section', async () => {
   assert.match(response.body, /formatAuditTimestamp\(entry\.timestampIso \|\| entry\.timestamp\)/);
   assert.match(response.body, /formatAuditTimestamp\(testStatus\.lastRunAtIso \|\| testStatus\.lastRunAt\)/);
 });
+
+test('dashboard state includes model context windows and primary context window', async () => {
+  const { app } = await withApp({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/api/ps')) {
+        return new Response(JSON.stringify({ models: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+
+      return new Response(JSON.stringify({ models: [{ name: 'llama3.2:3b' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    },
+    runCommand: async () => ({ code: 1, stdout: '', stderr: '' })
+  });
+
+  const response = await app.inject({ url: '/api/state' });
+  const payload = response.json();
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(payload.summary.modelContextWindows, {
+    'llama3.2:3b': 8192,
+    'qwen3:8b': 32768,
+    'llama3.1:8b': 32768
+  });
+  assert.equal(payload.summary.primaryContextWindow, 8192);
+});
+
+test('dashboard state includes memory usage with running models', async () => {
+  const { app } = await withApp({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/api/ps')) {
+        return new Response(JSON.stringify({
+          models: [
+            { name: 'llama3.2:3b', size: 2147483648, size_vram: 2147483648 }
+          ]
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+
+      return new Response(JSON.stringify({ models: [{ name: 'llama3.2:3b' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    },
+    runCommand: async () => ({
+      code: 0,
+      stdout: '32768000 16384000',
+      stderr: ''
+    })
+  });
+
+  const response = await app.inject({ url: '/api/state' });
+  const payload = response.json();
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(payload.memory.ok, true);
+  assert.equal(payload.memory.runningModels.length, 1);
+  assert.equal(payload.memory.runningModels[0].name, 'llama3.2:3b');
+  assert.equal(payload.memory.runningModels[0].size, 2147483648);
+  assert.equal(payload.memory.system.ok, true);
+  assert.equal(payload.memory.system.usagePercent, 50);
+});
+
+test('dashboard page includes memory usage and context window UI elements', async () => {
+  const { app } = await withApp();
+
+  const response = await app.inject({ url: '/' });
+
+  assert.equal(response.statusCode, 200);
+  assert.match(response.body, /RAM Memory Usage/);
+  assert.match(response.body, /Context Window/);
+  assert.match(response.body, /running-models-list/);
+  assert.match(response.body, /memory-bar-fill/);
+  assert.match(response.body, /primary-context/);
+  assert.match(response.body, /renderMemory/);
+});
+
+// --- /api/restart endpoint ---
+
+test('restart endpoint rejects when confirm is not provided', async () => {
+  const { app } = await withApp();
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/restart',
+    headers: { 'content-type': 'application/json' },
+    body: {}
+  });
+  const payload = response.json();
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(payload.ok, false);
+  assert.match(payload.message, /restart confirmation is required/i);
+});
+
+test('restart endpoint succeeds when confirmed with a mock systemctl', async () => {
+  const calls = [];
+  const { app } = await withApp({
+    runCommand: async (command, args) => {
+      calls.push([command, args]);
+      return { code: 0, stdout: '', stderr: '' };
+    }
+  });
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/restart',
+    headers: { 'content-type': 'application/json' },
+    body: { confirm: true }
+  });
+  const payload = response.json();
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(payload.ok, true);
+  assert.match(payload.message, /restarted/i);
+  assert.deepEqual(calls, [['systemctl', ['--user', 'restart', 'openclaw-gateway']]]);
+});
+
+// --- /api/config/validate endpoint ---
+
+test('validate endpoint accepts valid JSON and returns ok', async () => {
+  const { app } = await withApp();
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/config/validate',
+    headers: { 'content-type': 'application/json' },
+    body: { text: '{"agents":{}}' }
+  });
+  const payload = response.json();
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(payload.ok, true);
+});
+
+test('validate endpoint rejects invalid JSON with an error message', async () => {
+  const { app } = await withApp();
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/config/validate',
+    headers: { 'content-type': 'application/json' },
+    body: { text: '{broken json' }
+  });
+  const payload = response.json();
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(payload.ok, false);
+  assert.match(payload.error, /Invalid JSON/i);
+});
+
+// --- /api/probe/models with empty array ---
+
+test('batch probe endpoint rejects an empty model list', async () => {
+  const { app } = await withApp();
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/probe/models',
+    headers: { 'content-type': 'application/json' },
+    body: { modelIds: [] }
+  });
+  const payload = response.json();
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(payload.ok, false);
+  assert.match(payload.message, /at least one model/i);
+});
+
+// --- Live writes enabled path ---
+
+test('saving a model switch succeeds on the live config path when live writes are enabled', async () => {
+  const { app, liveConfigPath } = await withApp({
+    startInLiveMode: true,
+    allowLiveWrites: true,
+    modelProbeScriptPath: '/tmp/fake-probe.sh',
+    runCommand: async (command) => {
+      if (command === '/bin/bash') {
+        return {
+          code: 0,
+          stdout: `-----
+MODEL=qwen3:8b
+CHAT_HTTP=200
+CHAT_OK=yes
+CHAT_SUMMARY=CHAT_OK
+TOOLS_HTTP=200
+TOOLS_OUTCOME=tool_calls_returned
+TOOLS_SUMMARY=add_numbers {"a":2,"b":2}`,
+          stderr: ''
+        };
+      }
+
+      return { code: 0, stdout: '', stderr: '' };
+    }
+  });
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/config/primary-model',
+    headers: { 'content-type': 'application/json' },
+    body: { modelId: 'qwen3:8b' }
+  });
+  const payload = response.json();
+  const saved = JSON.parse(await fs.readFile(liveConfigPath, 'utf8'));
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(payload.ok, true);
+  assert.equal(saved.agents.defaults.model.primary, 'qwen3:8b');
+});
+
+// --- /api/health success case ---
+
+test('health endpoint reports success when both services are healthy', async () => {
+  const { app } = await withApp({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/health')) {
+        return new Response(JSON.stringify({ status: 'ok' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+
+      return new Response(JSON.stringify({ models: [{ name: 'llama3.2:3b' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    }
+  });
+
+  const response = await app.inject({ url: '/api/health' });
+  const payload = response.json();
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(payload.ok, true);
+  assert.deepEqual(payload.failedChecks, []);
+  assert.equal(payload.openclaw.ok, true);
+  assert.equal(payload.ollama.ok, true);
+});
+
+// --- Mode switch edge cases ---
+
+test('switching to live mode is rejected when no live config path is configured', async () => {
+  const { createApp } = require('../src/app');
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openclaw-dashboard-nolive-'));
+  const fixturePath = path.join(__dirname, 'fixtures', 'openclaw.valid.json');
+  const configPath = path.join(tempDir, 'openclaw.sandbox.json');
+  await fs.copyFile(fixturePath, configPath);
+
+  const appNoLive = createApp({
+    configPath,
+    resetSourcePath: configPath,
+    sandboxConfigPath: configPath,
+    sandboxResetSourcePath: configPath,
+    liveConfigPath: null,
+    liveResetSourcePath: null,
+    auditLogPath: path.join(tempDir, 'history.json'),
+    now: () => '20260416T120000'
+  });
+
+  const response = await appNoLive.inject({
+    method: 'POST',
+    url: '/api/mode',
+    headers: { 'content-type': 'application/json' },
+    body: { mode: 'live', confirm: true }
+  });
+  const payload = response.json();
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(payload.ok, false);
+  assert.match(payload.message, /not configured/i);
+});
+
+test('switching to an invalid mode returns 400', async () => {
+  const { app } = await withApp();
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/mode',
+    headers: { 'content-type': 'application/json' },
+    body: { mode: 'invalid' }
+  });
+  const payload = response.json();
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(payload.ok, false);
+  assert.match(payload.message, /must be either/i);
+});
+
+// --- Internal error handler (500) ---
+
+test('internal errors are caught and returned as 500 with a message', async () => {
+  const { app, configPath } = await withApp();
+
+  // Corrupt the config file so loadConfig throws
+  await fs.writeFile(configPath, 'NOT VALID JSON', 'utf8');
+
+  const response = await app.inject({ url: '/api/state' });
+  const payload = response.json();
+
+  assert.equal(response.statusCode, 500);
+  assert.equal(payload.ok, false);
+  assert.ok(payload.message.length > 0);
+});
+
+// --- 404 handler ---
+
+test('unknown routes return 404', async () => {
+  const { app } = await withApp();
+
+  const response = await app.inject({ url: '/api/nonexistent' });
+  const payload = response.json();
+
+  assert.equal(response.statusCode, 404);
+  assert.equal(payload.ok, false);
+  assert.match(payload.message, /not found/i);
+});

@@ -10,7 +10,8 @@ const {
   switchPrimaryModel,
   maskSecrets,
   listConfiguredModelIds,
-  listToolCapableConfiguredModels
+  listToolCapableConfiguredModels,
+  getModelContextWindows
 } = require('../src/config-service');
 
 async function createTempConfigFixture() {
@@ -375,4 +376,57 @@ test('maskSecrets hides auth and telegram tokens in UI payloads', () => {
 
   assert.equal(masked.gateway.authToken.includes('super-secret'), false);
   assert.equal(masked.integrations.telegram.botToken.includes('telegram-secret'), false);
+});
+
+test('getModelContextWindows extracts context windows from object-based catalogs', () => {
+  const fixture = require('./fixtures/openclaw.valid.json');
+
+  const result = getModelContextWindows(fixture);
+
+  assert.deepEqual(result, {
+    'llama3.2:3b': 8192,
+    'qwen3:8b': 32768,
+    'llama3.1:8b': 32768
+  });
+});
+
+test('getModelContextWindows extracts context windows from array-based catalogs', () => {
+  const config = {
+    models: {
+      providers: {
+        ollama: {
+          models: [
+            { name: 'llama3.2:3b', contextWindow: 8192, compat: { supportsTools: true } },
+            { name: 'qwen3:8b', contextWindow: 32768, compat: { supportsTools: true } },
+            { name: 'gemma3:12b', compat: { supportsTools: false } }
+          ]
+        }
+      }
+    }
+  };
+
+  const result = getModelContextWindows(config);
+
+  assert.deepEqual(result, {
+    'llama3.2:3b': 8192,
+    'qwen3:8b': 32768
+  });
+});
+
+test('getModelContextWindows returns empty object when no context windows are set', () => {
+  const config = {
+    models: {
+      providers: {
+        ollama: {
+          models: {
+            'llama3.2:3b': { compat: { supportsTools: true } }
+          }
+        }
+      }
+    }
+  };
+
+  const result = getModelContextWindows(config);
+
+  assert.deepEqual(result, {});
 });
