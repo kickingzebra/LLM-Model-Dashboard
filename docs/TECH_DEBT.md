@@ -27,9 +27,10 @@ Tracked items to address in future iterations. Each entry notes what, why, and t
 
 ---
 
-## 2. Dashboard writes malformed model entries when promoting Ollama models (bug)
+## 2. Dashboard writes malformed model entries when promoting Ollama models (bug) — **RESOLVED 2026-04-18**
 
 **Logged:** 2026-04-17
+**Resolved:** 2026-04-18 (commit `1125514`)
 **Priority:** High
 **Effort:** Small
 
