@@ -45,29 +45,70 @@ function getCatalogEntry(config, modelId) {
   return catalog[modelId] || null;
 }
 
+// Fields OpenClaw 2026.4.12 rejects when present on an Ollama catalog entry.
+// Callers historically passed `notes` as a breadcrumb; the schema forbids it.
+const DISALLOWED_CATALOG_FIELDS = ['notes'];
+
+// Defaults applied when a caller promotes a model without specifying every
+// schema-required field. These match OpenClaw's expected shape for an Ollama
+// model entry in an array-style catalog.
+const DEFAULT_OLLAMA_CATALOG_ENTRY = Object.freeze({
+  reasoning: false,
+  input: ['text'],
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  contextWindow: 131072,
+  maxTokens: 8192
+});
+
+function buildSchemaCompliantCatalogEntry(modelId, catalogEntry) {
+  const source = catalogEntry && typeof catalogEntry === 'object' ? catalogEntry : {};
+  const sanitized = { ...source };
+  for (const disallowed of DISALLOWED_CATALOG_FIELDS) {
+    delete sanitized[disallowed];
+  }
+
+  return {
+    id: modelId,
+    name: modelId,
+    reasoning:
+      sanitized.reasoning !== undefined ? sanitized.reasoning : DEFAULT_OLLAMA_CATALOG_ENTRY.reasoning,
+    input: sanitized.input ? [...sanitized.input] : [...DEFAULT_OLLAMA_CATALOG_ENTRY.input],
+    cost: sanitized.cost ? { ...sanitized.cost } : { ...DEFAULT_OLLAMA_CATALOG_ENTRY.cost },
+    contextWindow:
+      sanitized.contextWindow !== undefined
+        ? sanitized.contextWindow
+        : DEFAULT_OLLAMA_CATALOG_ENTRY.contextWindow,
+    maxTokens:
+      sanitized.maxTokens !== undefined ? sanitized.maxTokens : DEFAULT_OLLAMA_CATALOG_ENTRY.maxTokens,
+    ...(sanitized.compat ? { compat: { ...sanitized.compat } } : {})
+  };
+}
+
 function upsertCatalogEntry(config, modelId, catalogEntry) {
   const catalog = getOllamaCatalog(config);
 
   if (Array.isArray(catalog)) {
     const existingIndex = catalog.findIndex((entry) => getCatalogModelId(entry) === modelId);
-    const normalizedEntry =
-      catalogEntry && typeof catalogEntry === 'object'
-        ? { name: modelId, ...catalogEntry }
-        : { name: modelId };
+    const schemaEntry = buildSchemaCompliantCatalogEntry(modelId, catalogEntry);
 
     if (existingIndex === -1) {
-      catalog.push(normalizedEntry);
-      return normalizedEntry;
+      catalog.push(schemaEntry);
+      return schemaEntry;
     }
 
-    catalog[existingIndex] = {
-      ...catalog[existingIndex],
-      ...normalizedEntry
-    };
+    // Preserve any existing schema-valid fields not supplied by the caller,
+    // but always drop disallowed fields from the merged result.
+    const merged = { ...catalog[existingIndex], ...schemaEntry };
+    for (const disallowed of DISALLOWED_CATALOG_FIELDS) {
+      delete merged[disallowed];
+    }
+    catalog[existingIndex] = merged;
     return catalog[existingIndex];
   }
 
-  catalog[modelId] = catalogEntry;
+  // Object-keyed catalog. Still sanitize the entry and guarantee core fields.
+  const schemaEntry = buildSchemaCompliantCatalogEntry(modelId, catalogEntry);
+  catalog[modelId] = schemaEntry;
   return catalog[modelId];
 }
 

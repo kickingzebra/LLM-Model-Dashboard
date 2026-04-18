@@ -821,3 +821,46 @@ test('unknown routes return 404', async () => {
   assert.equal(payload.ok, false);
   assert.match(payload.message, /not found/i);
 });
+
+// Regression: end-to-end promotion of an Ollama model must produce a
+// schema-compliant entry on disk (no `notes`, required fields present).
+test('promoting a new model via /api/config/primary-model writes a schema-valid catalog entry', async () => {
+  const { app, configPath } = await withApp();
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/config/primary-model',
+    headers: { 'content-type': 'application/json' },
+    body: {
+      modelId: 'qwen3.5:27b',
+      addToCatalog: true,
+      catalogEntry: {
+        notes: 'Promoted from installed Ollama model',
+        compat: { supportsTools: false }
+      }
+    }
+  });
+
+  assert.equal(response.statusCode, 200);
+  const payload = response.json();
+  assert.equal(payload.ok, true);
+
+  const saved = JSON.parse(await fs.readFile(configPath, 'utf8'));
+  const catalog = saved.models.providers.ollama.models;
+  const entries = Array.isArray(catalog) ? catalog : Object.values(catalog);
+  const entry = entries.find((e) => (e.id || e.name) === 'qwen3.5:27b');
+
+  assert.ok(entry, 'promoted entry must be written to disk');
+  assert.equal(entry.id, 'qwen3.5:27b');
+  assert.equal(entry.name, 'qwen3.5:27b');
+  assert.equal(entry.reasoning, false);
+  assert.deepEqual(entry.input, ['text']);
+  assert.ok(entry.cost && typeof entry.cost === 'object');
+  assert.ok(typeof entry.contextWindow === 'number' && entry.contextWindow > 0);
+  assert.ok(typeof entry.maxTokens === 'number' && entry.maxTokens > 0);
+  assert.ok(
+    !Object.prototype.hasOwnProperty.call(entry, 'notes'),
+    'promoted entry must not include the non-schema `notes` field'
+  );
+});
+

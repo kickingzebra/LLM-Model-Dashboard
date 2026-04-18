@@ -1581,7 +1581,6 @@ function renderDashboardHtml() {
       const modelId = document.getElementById('model-select').value;
       const configured = latestState.summary.availableConfiguredModels.includes(modelId);
       const catalogEntry = configured ? null : {
-        notes: 'Promoted from installed Ollama model',
         compat: { supportsTools: false }
       };
       const response = await fetch('/api/config/primary-model', {
