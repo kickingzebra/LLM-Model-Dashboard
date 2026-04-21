@@ -173,6 +173,77 @@ TOOLS_SUMMARY=add_numbers {"a":2,"b":2}`,
   ]);
 });
 
+test('getMemoryUsage reports running models and system memory', async () => {
+  const service = createSystemService({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/api/ps')) {
+        return new Response(JSON.stringify({
+          models: [
+            { name: 'qwen3:8b', size: 5368709120, size_vram: 5368709120, expires_at: '2026-04-16T12:00:00Z' },
+            { name: 'llama3.2:3b', size: 2147483648, size_vram: 2147483648, expires_at: '2026-04-16T12:05:00Z' }
+          ]
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+
+      return new Response(JSON.stringify({ models: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    },
+    runCommand: async () => ({
+      code: 0,
+      stdout: '16384000 8192000',
+      stderr: ''
+    })
+  });
+
+  const result = await service.getMemoryUsage();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.runningModels.length, 2);
+  assert.equal(result.runningModels[0].name, 'qwen3:8b');
+  assert.equal(result.runningModels[0].size, 5368709120);
+  assert.match(result.runningModels[0].sizeFormatted, /5\.0 GB/);
+  assert.equal(result.runningModels[1].name, 'llama3.2:3b');
+  assert.equal(result.totalModelMemory, 5368709120 + 2147483648);
+  assert.equal(result.system.ok, true);
+  assert.equal(result.system.usagePercent, 50);
+  assert.match(result.system.totalFormatted, /GB/);
+});
+
+test('getMemoryUsage handles no running models gracefully', async () => {
+  const service = createSystemService({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/api/ps')) {
+        return new Response(JSON.stringify({ models: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+
+      return new Response(JSON.stringify({ models: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    },
+    runCommand: async () => ({
+      code: 1,
+      stdout: '',
+      stderr: 'error'
+    })
+  });
+
+  const result = await service.getMemoryUsage();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.runningModels.length, 0);
+  assert.equal(result.totalModelMemory, 0);
+  assert.equal(result.system.ok, false);
+});
+
 test('getTestStatus normalizes legacy and ISO timestamps for display', async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openclaw-test-status-'));
   const testReportPath = path.join(tempDir, 'test-report.json');

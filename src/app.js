@@ -3,7 +3,8 @@ const http = require('node:http');
 const {
   createConfigService,
   listConfiguredModelIds,
-  listToolCapableConfiguredModels
+  listToolCapableConfiguredModels,
+  getModelContextWindows
 } = require('./config-service');
 const { createSystemService } = require('./system-service');
 
@@ -78,13 +79,14 @@ function createApp(options) {
       if (request.method === 'GET' && request.url === '/api/state') {
         const configService = getConfigService();
         const modePaths = getModePaths();
-        const [config, health, history, probeResults, modelLiveLog, testStatus] = await Promise.all([
+        const [config, health, history, probeResults, modelLiveLog, testStatus, memory] = await Promise.all([
           configService.getMaskedConfig(),
           systemService.checkHealth(),
           configService.getHistory(),
           systemService.getProbeResults(),
           systemService.getModelLiveLog(),
-          systemService.getTestStatus()
+          systemService.getTestStatus(),
+          systemService.getMemoryUsage()
         ]);
 
         return sendJson(response, 200, {
@@ -101,7 +103,8 @@ function createApp(options) {
           history,
           probeResults,
           modelLiveLog,
-          testStatus
+          testStatus,
+          memory
         });
       }
 
@@ -336,11 +339,16 @@ function summarizeConfig(config, options = {}) {
     defaults.routing?.primaryModel ||
     null;
 
+  const contextWindows = getModelContextWindows(config);
+  const primaryContextWindow = primaryModel ? (contextWindows[primaryModel] || null) : null;
+
   return {
     primaryModel,
+    primaryContextWindow,
     activeModels: defaults?.models || {},
     availableConfiguredModels: listConfiguredModelIds(config),
     toolCapableConfiguredModels: listToolCapableConfiguredModels(config),
+    modelContextWindows: contextWindows,
     telegramEnabled: Boolean(telegram.enabled),
     telegramChannelConfigured: Boolean(telegram.channelId),
     toolProfile: defaults.toolProfile || null,
@@ -403,7 +411,7 @@ function renderDashboardHtml() {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LLM managament and orchestration</title>
+  <title>LLM management and orchestration</title>
   <style>
     :root {
       --bg: #0f1720;
@@ -417,7 +425,9 @@ function renderDashboardHtml() {
       --ok: #4fd1a5;
       --error: #f87171;
       --line: rgba(159, 176, 195, 0.18);
-      --shadow: 0 22px 80px rgba(0, 0, 0, 0.34);
+      --shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+      --radius: 16px;
+      --radius-sm: 12px;
     }
     * { box-sizing: border-box; }
     body {
@@ -425,8 +435,8 @@ function renderDashboardHtml() {
       font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
       color: var(--ink);
       background:
-        radial-gradient(circle at top left, rgba(239, 131, 84, 0.28) 0, transparent 26%),
-        radial-gradient(circle at top right, rgba(79, 209, 165, 0.16) 0, transparent 24%),
+        radial-gradient(circle at top left, rgba(239, 131, 84, 0.22) 0, transparent 26%),
+        radial-gradient(circle at top right, rgba(79, 209, 165, 0.12) 0, transparent 24%),
         linear-gradient(140deg, #07111b 0%, #0b1622 45%, #132131 100%);
       min-height: 100vh;
     }
@@ -435,25 +445,27 @@ function renderDashboardHtml() {
       position: fixed;
       inset: 0;
       background-image:
-        linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+        linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
       background-size: 32px 32px;
-      mask-image: linear-gradient(to bottom, rgba(0,0,0,0.5), transparent 88%);
+      mask-image: linear-gradient(to bottom, rgba(0,0,0,0.4), transparent 80%);
       pointer-events: none;
     }
     .shell {
       position: relative;
       max-width: 1280px;
       margin: 0 auto;
-      padding: 34px 20px 56px;
+      padding: 24px 20px 48px;
     }
+
+    /* ---- Hero: compact top bar ---- */
     .hero {
-      margin-bottom: 22px;
-      padding: 30px;
+      margin-bottom: 18px;
+      padding: 18px 24px;
       border: 1px solid var(--line);
-      border-radius: 28px;
+      border-radius: var(--radius);
       background:
-        linear-gradient(135deg, rgba(239, 131, 84, 0.14), rgba(17, 28, 40, 0.74) 38%, rgba(109, 211, 199, 0.1));
+        linear-gradient(135deg, rgba(239, 131, 84, 0.1), rgba(17, 28, 40, 0.8) 50%, rgba(109, 211, 199, 0.06));
       backdrop-filter: blur(10px);
       box-shadow: var(--shadow);
       overflow: hidden;
@@ -462,128 +474,149 @@ function renderDashboardHtml() {
     .hero::after {
       content: "";
       position: absolute;
-      width: 360px;
-      height: 360px;
-      right: -120px;
-      top: -80px;
-      background: radial-gradient(circle, rgba(109, 211, 199, 0.18), transparent 68%);
+      width: 260px;
+      height: 260px;
+      right: -80px;
+      top: -60px;
+      background: radial-gradient(circle, rgba(109, 211, 199, 0.12), transparent 68%);
       pointer-events: none;
     }
     .hero-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.85fr);
-      gap: 24px;
-      align-items: end;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
       position: relative;
       z-index: 1;
+      flex-wrap: wrap;
     }
-    @media (max-width: 900px) {
-      .hero-grid {
-        grid-template-columns: 1fr;
-      }
+    .hero-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+      min-width: 0;
     }
     .eyebrow {
       display: inline-block;
-      padding: 8px 12px;
-      margin-bottom: 14px;
+      padding: 5px 10px;
       border-radius: 999px;
       background: rgba(239, 131, 84, 0.12);
       border: 1px solid rgba(239, 131, 84, 0.25);
       color: var(--accent-soft);
-      font-size: 0.78rem;
+      font-size: 0.72rem;
       letter-spacing: 0.12em;
       text-transform: uppercase;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
     .hero h1 {
-      margin: 0 0 10px;
-      font-size: clamp(2.1rem, 4.5vw, 4rem);
-      line-height: 0.95;
-      max-width: 11ch;
-      text-wrap: balance;
+      margin: 0;
+      font-size: clamp(1.3rem, 2.5vw, 1.8rem);
+      line-height: 1.1;
+      white-space: nowrap;
     }
     .hero p {
+      display: none;
+    }
+    .hero-panel { display: none; }
+    .hero .pill-row {
       margin: 0;
-      color: var(--muted);
-      max-width: 58ch;
-      font-size: 1rem;
-      line-height: 1.6;
+      gap: 6px;
     }
-    .hero-panel {
-      padding: 20px;
-      border-radius: 22px;
-      border: 1px solid rgba(109, 211, 199, 0.16);
-      background: rgba(8, 16, 25, 0.54);
+    .hero .pill {
+      padding: 4px 10px;
+      font-size: 0.78rem;
     }
-    .hero-panel h3 {
-      margin: 0 0 12px;
-      font-size: 0.85rem;
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      color: var(--accent-cool);
-    }
-    .hero-panel p {
-      margin: 0 0 16px;
-      font-size: 0.95rem;
-      line-height: 1.6;
-      color: #d7e2ec;
-    }
+
+    /* ---- Metric strip ---- */
     .overview {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-      gap: 12px;
-      margin-bottom: 20px;
-    }
-    .metric {
-      padding: 16px 16px 18px;
+      display: flex;
+      gap: 0;
+      margin-bottom: 18px;
       border: 1px solid var(--line);
-      border-radius: 20px;
+      border-radius: var(--radius);
       background: linear-gradient(180deg, rgba(13, 23, 36, 0.94), rgba(10, 18, 29, 0.82));
       box-shadow: var(--shadow);
-      position: relative;
       overflow: hidden;
-      min-height: 108px;
+    }
+    .metric {
+      flex: 1 1 0;
+      padding: 14px 16px;
+      min-height: 0;
       display: flex;
       flex-direction: column;
-      justify-content: space-between;
+      justify-content: center;
+      position: relative;
+      border-right: 1px solid var(--line);
     }
-    .metric::before {
-      content: "";
-      position: absolute;
-      left: 0;
-      top: 0;
-      width: 100%;
-      height: 3px;
-      background: linear-gradient(90deg, var(--accent), transparent 70%);
-    }
+    .metric:last-child { border-right: none; }
     .metric-label {
-      margin: 0 0 10px;
+      margin: 0 0 4px;
       color: var(--muted);
-      font-size: 0.82rem;
+      font-size: 0.72rem;
       text-transform: uppercase;
       letter-spacing: 0.08em;
     }
     .metric-value {
       margin: 0;
-      font-size: 1.28rem;
+      font-size: 1.05rem;
       font-weight: 700;
       line-height: 1.3;
       word-break: break-word;
     }
     .metric-value.small {
-      font-size: 0.9rem;
+      font-size: 0.82rem;
       color: #d8e1ea;
     }
+    @media (max-width: 900px) {
+      .overview {
+        flex-wrap: wrap;
+      }
+      .metric {
+        flex: 1 1 calc(50% - 1px);
+        border-bottom: 1px solid var(--line);
+      }
+      .metric:nth-child(even) { border-right: none; }
+      .metric:nth-last-child(-n+2) { border-bottom: none; }
+    }
+    @media (max-width: 500px) {
+      .metric {
+        flex: 1 1 100%;
+        border-right: none;
+        border-bottom: 1px solid var(--line);
+      }
+      .metric:last-child { border-bottom: none; }
+    }
+
+    /* ---- Section dividers ---- */
+    .section-label {
+      grid-column: span 12;
+      margin: 8px 0 -4px;
+      padding: 0;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      opacity: 0.7;
+    }
+    .section-label:first-child {
+      margin-top: 0;
+    }
+
+    /* ---- Grid & Cards ---- */
     .grid {
       display: grid;
       grid-template-columns: repeat(12, minmax(0, 1fr));
-      gap: 18px;
+      gap: 14px;
       align-items: start;
     }
     .card {
       background: var(--panel);
       border: 1px solid var(--line);
-      border-radius: 24px;
-      padding: 22px;
+      border-radius: var(--radius);
+      padding: 18px;
       box-shadow: var(--shadow);
       position: relative;
       overflow: hidden;
@@ -593,7 +626,7 @@ function renderDashboardHtml() {
       position: absolute;
       inset: 0 0 auto 0;
       height: 1px;
-      background: linear-gradient(90deg, rgba(239, 131, 84, 0.44), transparent 72%);
+      background: linear-gradient(90deg, rgba(239, 131, 84, 0.36), transparent 60%);
     }
     .card-mode { grid-column: span 4; }
     .card-primary { grid-column: span 4; }
@@ -608,138 +641,214 @@ function renderDashboardHtml() {
     .card-matrix { grid-column: span 12; }
     @media (max-width: 1024px) {
       .card-mode, .card-primary, .card-health, .card-recovery,
-      .card-validation, .card-summary, .card-history, .card-live-log, .card-probe, .card-tests, .card-matrix {
+      .card-validation, .card-summary, .card-history, .card-live-log,
+      .card-probe, .card-tests, .card-matrix {
         grid-column: span 12;
       }
     }
+
+    /* ---- Card internals ---- */
     h2 {
-      margin: 0 0 10px;
-      font-size: 1.2rem;
+      margin: 0 0 6px;
+      font-size: 1.1rem;
       letter-spacing: 0.01em;
     }
     .card-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 10px;
+      gap: 10px;
+      margin-bottom: 8px;
     }
     .card-kicker {
       display: inline-flex;
       align-items: center;
-      padding: 6px 10px;
+      padding: 4px 9px;
       border-radius: 999px;
-      border: 1px solid rgba(159, 176, 195, 0.18);
+      border: 1px solid rgba(159, 176, 195, 0.15);
       background: rgba(255, 255, 255, 0.04);
       color: var(--muted);
-      font-size: 0.75rem;
+      font-size: 0.7rem;
       letter-spacing: 0.08em;
       text-transform: uppercase;
     }
     .card-mode {
       background:
         linear-gradient(180deg, rgba(18, 31, 46, 0.98), rgba(13, 24, 37, 0.92)),
-        radial-gradient(circle at top right, rgba(109, 211, 199, 0.1), transparent 45%);
+        radial-gradient(circle at top right, rgba(109, 211, 199, 0.08), transparent 45%);
     }
+
+    /* ---- Form controls ---- */
     label, button, select, textarea { font: inherit; }
     select, textarea {
       width: 100%;
       margin-top: 8px;
-      padding: 12px 14px;
+      padding: 10px 12px;
       border: 1px solid var(--line);
-      border-radius: 16px;
+      border-radius: var(--radius-sm);
       background: rgba(7, 15, 24, 0.92);
       color: var(--ink);
+      transition: border-color 150ms ease, box-shadow 150ms ease;
+    }
+    select:focus, textarea:focus {
+      outline: none;
+      border-color: rgba(239, 131, 84, 0.5);
+      box-shadow: 0 0 0 3px rgba(239, 131, 84, 0.12);
     }
     button {
       border: none;
       border-radius: 999px;
-      padding: 11px 16px;
+      padding: 9px 14px;
       margin: 8px 8px 0 0;
       background: linear-gradient(135deg, var(--accent), var(--accent-soft));
       color: #07111b;
       font-weight: 700;
+      font-size: 0.88rem;
       cursor: pointer;
-      transition: transform 120ms ease, filter 120ms ease;
+      transition: transform 120ms ease, filter 120ms ease, opacity 120ms ease;
     }
-    button:hover { transform: translateY(-1px); filter: brightness(1.05); }
+    button:hover { transform: translateY(-1px); filter: brightness(1.08); }
+    button:active { transform: translateY(0); }
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      transform: none;
+      filter: none;
+    }
     button.secondary {
-      background: rgba(159, 176, 195, 0.16);
+      background: rgba(159, 176, 195, 0.14);
       color: var(--ink);
-      border: 1px solid rgba(159, 176, 195, 0.24);
+      border: 1px solid rgba(159, 176, 195, 0.22);
     }
+    button.secondary:hover { background: rgba(159, 176, 195, 0.22); }
     button.ghost {
       background: transparent;
       color: var(--ink);
-      border: 1px solid rgba(159, 176, 195, 0.24);
+      border: 1px solid rgba(159, 176, 195, 0.22);
     }
-    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    button.ghost:hover { background: rgba(255, 255, 255, 0.04); }
+    button.danger {
+      background: rgba(248, 113, 113, 0.14);
+      color: var(--error);
+      border: 1px solid rgba(248, 113, 113, 0.25);
+    }
+    button.danger:hover { background: rgba(248, 113, 113, 0.22); }
+    .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
     .actions button { margin: 0; }
     .mode-actions button {
-      flex: 1 1 150px;
+      flex: 1 1 140px;
     }
+
+    /* ---- Status messages ---- */
     .status {
-      margin-top: 14px;
-      min-height: 24px;
-      font-weight: 700;
+      margin-top: 10px;
+      min-height: 0;
+      font-weight: 600;
+      font-size: 0.88rem;
       line-height: 1.5;
       word-break: break-word;
+      padding: 0;
+      border-radius: var(--radius-sm);
+      transition: all 200ms ease;
     }
-    .ok { color: var(--ok); }
-    .error { color: var(--error); }
-    .meta { color: var(--muted); font-size: 0.95rem; line-height: 1.6; }
+    .status:empty { display: none; }
+    .status.ok {
+      color: var(--ok);
+      padding: 8px 12px;
+      background: rgba(79, 209, 165, 0.08);
+      border-left: 3px solid var(--ok);
+    }
+    .status.error {
+      color: var(--error);
+      padding: 8px 12px;
+      background: rgba(248, 113, 113, 0.08);
+      border-left: 3px solid var(--error);
+    }
+    .meta { color: var(--muted); font-size: 0.85rem; line-height: 1.55; }
     .subtle-strong { color: #dce7f2; font-weight: 700; }
-    .stack { display: grid; gap: 12px; }
+    .stack { display: grid; gap: 10px; }
+
+    /* ---- Pills ---- */
     .pill-row {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 14px;
+      gap: 6px;
+      margin-top: 10px;
     }
     .pill {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      padding: 8px 12px;
+      gap: 6px;
+      padding: 5px 10px;
       border-radius: 999px;
       border: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.05);
+      background: rgba(255, 255, 255, 0.04);
       color: var(--muted);
-      font-size: 0.9rem;
+      font-size: 0.8rem;
     }
+
+    /* ---- Health indicators ---- */
     .health-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px;
-      margin-top: 12px;
+      gap: 10px;
+      margin-top: 10px;
     }
     .health-tile {
-      padding: 14px;
-      border-radius: 18px;
+      padding: 12px;
+      border-radius: var(--radius-sm);
       border: 1px solid var(--line);
       background: rgba(255, 255, 255, 0.03);
     }
     .health-tile strong {
       display: block;
-      margin-bottom: 6px;
-      font-size: 0.82rem;
+      margin-bottom: 4px;
+      font-size: 0.75rem;
       letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--muted);
     }
-    .health-state { font-size: 1rem; font-weight: 700; }
+    .health-state {
+      font-size: 0.95rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .health-state::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .health-state.is-ok::before {
+      background: var(--ok);
+      box-shadow: 0 0 6px rgba(79, 209, 165, 0.5);
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+    .health-state.is-down::before {
+      background: var(--error);
+      box-shadow: 0 0 6px rgba(248, 113, 113, 0.4);
+    }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    /* ---- Recovery / Backup ---- */
     .backup-path {
-      margin-top: 12px;
-      padding: 14px;
-      border-radius: 18px;
-      border: 1px dashed rgba(239, 131, 84, 0.34);
-      background: rgba(239, 131, 84, 0.08);
+      margin-top: 10px;
+      padding: 12px;
+      border-radius: var(--radius-sm);
+      border: 1px dashed rgba(239, 131, 84, 0.3);
+      background: rgba(239, 131, 84, 0.06);
     }
     .backup-path strong {
       display: block;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
       color: var(--accent-soft);
-      font-size: 0.82rem;
+      font-size: 0.75rem;
       text-transform: uppercase;
       letter-spacing: 0.08em;
     }
@@ -750,108 +859,117 @@ function renderDashboardHtml() {
       color: #fff2e9;
       white-space: normal;
       word-break: break-word;
-      font-size: 0.92rem;
+      font-size: 0.85rem;
       line-height: 1.5;
     }
+
+    /* ---- Mode control ---- */
     .mode-shell {
       display: grid;
-      gap: 12px;
-      margin-top: 14px;
+      gap: 10px;
+      margin-top: 10px;
     }
     .mode-banner {
-      padding: 14px 16px;
-      border-radius: 18px;
+      padding: 12px 14px;
+      border-radius: var(--radius-sm);
       border: 1px solid rgba(109, 211, 199, 0.18);
-      background: linear-gradient(135deg, rgba(109, 211, 199, 0.12), rgba(255, 255, 255, 0.03));
+      background: linear-gradient(135deg, rgba(109, 211, 199, 0.1), rgba(255, 255, 255, 0.02));
     }
     .mode-banner strong {
       display: block;
-      margin-bottom: 6px;
-      font-size: 0.82rem;
+      margin-bottom: 4px;
+      font-size: 0.75rem;
       color: var(--accent-cool);
       letter-spacing: 0.08em;
       text-transform: uppercase;
     }
     .mode-banner code {
       display: block;
-      margin-top: 8px;
+      margin-top: 6px;
       white-space: normal;
       word-break: break-word;
       line-height: 1.5;
+      font-size: 0.85rem;
     }
     .mode-note {
       color: var(--muted);
-      font-size: 0.9rem;
-      line-height: 1.6;
+      font-size: 0.85rem;
+      line-height: 1.5;
     }
+
+    /* ---- Lists ---- */
     .list {
       list-style: none;
       padding: 0;
-      margin: 14px 0 0;
+      margin: 10px 0 0;
       display: grid;
-      gap: 10px;
+      gap: 8px;
     }
     .list li {
-      padding: 14px 16px;
-      border-radius: 18px;
+      padding: 12px 14px;
+      border-radius: var(--radius-sm);
       border: 1px solid var(--line);
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02));
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015));
       line-height: 1.5;
       color: #dde7f0;
+      font-size: 0.9rem;
     }
     .history-action {
       display: inline-block;
-      margin-bottom: 6px;
-      padding: 5px 9px;
+      margin-bottom: 4px;
+      padding: 3px 8px;
       border-radius: 999px;
       background: rgba(79, 209, 165, 0.12);
       color: var(--ok);
-      font-size: 0.8rem;
+      font-size: 0.75rem;
       text-transform: uppercase;
       letter-spacing: 0.08em;
     }
     .history-meta {
       display: block;
       color: var(--muted);
-      font-size: 0.88rem;
-      margin-top: 6px;
+      font-size: 0.82rem;
+      margin-top: 4px;
     }
     .empty {
       color: var(--muted);
       font-style: italic;
     }
     .summary-note {
-      margin-top: 12px;
-      padding: 14px 16px;
-      border-radius: 18px;
-      background: rgba(109, 211, 199, 0.08);
-      border: 1px solid rgba(109, 211, 199, 0.18);
+      margin-top: 10px;
+      padding: 12px 14px;
+      border-radius: var(--radius-sm);
+      background: rgba(109, 211, 199, 0.06);
+      border: 1px solid rgba(109, 211, 199, 0.15);
       color: #d9f7f0;
       line-height: 1.5;
+      font-size: 0.88rem;
     }
+
+    /* ---- Matrix table ---- */
     .matrix-wrap {
-      margin-top: 14px;
+      margin-top: 10px;
       border: 1px solid var(--line);
-      border-radius: 20px;
+      border-radius: var(--radius);
       overflow: hidden;
       background: rgba(8, 14, 23, 0.72);
     }
     .matrix-table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 0.92rem;
+      font-size: 0.88rem;
     }
     .matrix-table th,
     .matrix-table td {
-      padding: 12px 14px;
-      border-bottom: 1px solid rgba(159, 176, 195, 0.12);
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(159, 176, 195, 0.1);
       vertical-align: top;
       text-align: left;
     }
     .matrix-table th {
       background: rgba(255, 255, 255, 0.04);
       color: var(--muted);
-      font-size: 0.78rem;
+      font-size: 0.72rem;
       letter-spacing: 0.08em;
       text-transform: uppercase;
     }
@@ -861,9 +979,9 @@ function renderDashboardHtml() {
     .chip {
       display: inline-flex;
       align-items: center;
-      padding: 5px 9px;
+      padding: 3px 8px;
       border-radius: 999px;
-      font-size: 0.8rem;
+      font-size: 0.75rem;
       font-weight: 700;
       letter-spacing: 0.03em;
       white-space: nowrap;
@@ -881,53 +999,112 @@ function renderDashboardHtml() {
       color: var(--accent-soft);
     }
     .matrix-note {
-      margin-top: 14px;
+      margin-top: 10px;
       color: var(--muted);
-      line-height: 1.6;
+      font-size: 0.85rem;
+      line-height: 1.5;
     }
+
+    /* ---- Log viewer ---- */
     .log-path {
-      margin-top: 14px;
+      margin-top: 10px;
       color: var(--muted);
-      font-size: 0.9rem;
+      font-size: 0.85rem;
       line-height: 1.5;
       word-break: break-word;
     }
     .log-viewer {
-      margin-top: 14px;
-      padding: 16px;
-      border-radius: 18px;
+      margin-top: 10px;
+      padding: 14px;
+      border-radius: var(--radius-sm);
       border: 1px solid var(--line);
       background: rgba(6, 12, 20, 0.88);
       color: #e5eef7;
       font-family: "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
-      font-size: 0.88rem;
+      font-size: 0.82rem;
       line-height: 1.6;
       white-space: pre-wrap;
       word-break: break-word;
-      max-height: 520px;
+      max-height: 420px;
       overflow: auto;
     }
-    code { background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 6px; }
+    code { background: rgba(255,255,255,0.08); padding: 2px 5px; border-radius: 5px; font-size: 0.88em; }
+
+    /* ---- Memory usage ---- */
+    .card-memory { grid-column: span 12; }
+    .memory-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-top: 10px;
+    }
+    @media (max-width: 768px) {
+      .memory-grid { grid-template-columns: 1fr; }
+    }
+    .memory-bar-wrap {
+      margin-top: 10px;
+    }
+    .memory-bar-label {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 6px;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+    .memory-bar {
+      height: 10px;
+      border-radius: 5px;
+      background: rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+    }
+    .memory-bar-fill {
+      height: 100%;
+      border-radius: 5px;
+      transition: width 400ms ease;
+    }
+    .memory-bar-fill.low { background: var(--ok); }
+    .memory-bar-fill.mid { background: var(--accent-soft); }
+    .memory-bar-fill.high { background: var(--error); }
+    .running-models-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: grid;
+      gap: 6px;
+    }
+    .running-models-list li {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.03);
+      font-size: 0.88rem;
+    }
+    .running-models-list .model-name {
+      font-weight: 700;
+    }
+    .running-models-list .model-mem {
+      color: var(--accent-cool);
+      font-size: 0.82rem;
+      font-weight: 600;
+    }
   </style>
 </head>
 <body>
   <main class="shell">
     <section class="hero">
       <div class="hero-grid">
-        <div>
+        <div class="hero-left">
           <span class="eyebrow">Local control plane</span>
-          <h1>LLM managament and orchestration</h1>
-          <p>Switch the active Ollama-backed model safely, validate and back up the OpenClaw config before writes, and keep a visible audit trail of every sandbox change.</p>
+          <h1>LLM management and orchestration</h1>
         </div>
-        <aside class="hero-panel">
-          <h3>Control Focus</h3>
-          <p>Use the sandbox to test model changes first, inspect the generated backup path, then decide whether the same pattern should be applied to your live OpenClaw config.</p>
-          <div class="pill-row">
-            <span class="pill">Safe sandbox flow</span>
-            <span class="pill">Recovery ready</span>
-            <span class="pill">Regression tested</span>
-          </div>
-        </aside>
+        <div class="pill-row">
+          <span class="pill">Safe sandbox flow</span>
+          <span class="pill">Recovery ready</span>
+          <span class="pill">Regression tested</span>
+        </div>
       </div>
     </section>
     <section class="overview">
@@ -948,6 +1125,10 @@ function renderDashboardHtml() {
         <p class="metric-value" id="installed-count">0</p>
       </article>
       <article class="metric">
+        <p class="metric-label">Context Window</p>
+        <p class="metric-value small" id="primary-context">Not set</p>
+      </article>
+      <article class="metric">
         <p class="metric-label">Latest Probe</p>
         <p class="metric-value small" id="latest-probe">No probe results yet.</p>
       </article>
@@ -961,6 +1142,7 @@ function renderDashboardHtml() {
       </article>
     </section>
     <section class="grid">
+      <div class="section-label">Operations</div>
       <article class="card card-mode">
         <div class="card-head">
           <h2>Mode Control</h2>
@@ -992,7 +1174,7 @@ function renderDashboardHtml() {
         <div class="actions">
           <button id="save-button">Save Model</button>
           <button id="refresh-button" class="ghost">Refresh</button>
-          <button id="reset-button" class="secondary">Reset Active Config</button>
+          <button id="reset-button" class="danger">Reset Active Config</button>
         </div>
         <div class="pill-row">
           <span class="pill">Configured catalog</span>
@@ -1010,10 +1192,55 @@ function renderDashboardHtml() {
         <div id="health-summary" class="health-grid">Loading...</div>
         <div class="actions">
           <button id="health-button" class="ghost">Check Health</button>
-          <button id="restart-button" class="secondary">Restart Gateway</button>
+          <button id="restart-button" class="danger">Restart Gateway</button>
         </div>
         <div id="health-status" class="status"></div>
       </article>
+      <div class="section-label">System Resources</div>
+      <article class="card card-memory">
+        <div class="card-head">
+          <h2>RAM Memory Usage</h2>
+          <span class="card-kicker">Live</span>
+        </div>
+        <p class="meta">System memory and memory consumed by running Ollama models.</p>
+        <div class="memory-grid">
+          <div>
+            <div class="memory-bar-wrap">
+              <div class="memory-bar-label">
+                <span>System RAM</span>
+                <span id="memory-percent">0%</span>
+              </div>
+              <div class="memory-bar">
+                <div class="memory-bar-fill low" id="memory-bar-fill" style="width: 0%"></div>
+              </div>
+            </div>
+            <div style="margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
+              <div class="health-tile">
+                <strong>Total</strong>
+                <div id="memory-total" class="health-state" style="font-size: 0.88rem;">--</div>
+              </div>
+              <div class="health-tile">
+                <strong>Used</strong>
+                <div id="memory-used" class="health-state" style="font-size: 0.88rem;">--</div>
+              </div>
+              <div class="health-tile">
+                <strong>Available</strong>
+                <div id="memory-available" class="health-state" style="font-size: 0.88rem;">--</div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="memory-bar-label" style="margin-bottom: 8px;">
+              <span>Running Models</span>
+              <span id="model-memory-total">0 B</span>
+            </div>
+            <ul class="running-models-list" id="running-models-list">
+              <li class="empty">No models loaded.</li>
+            </ul>
+          </div>
+        </div>
+      </article>
+      <div class="section-label">Data &amp; Recovery</div>
       <article class="card card-recovery">
         <div class="card-head">
           <h2>Recovery</h2>
@@ -1049,6 +1276,7 @@ function renderDashboardHtml() {
         <ul id="config-summary" class="list"></ul>
         <div class="summary-note">Tip: use <span class="subtle-strong">Save Model</span> to test a change, then use <span class="subtle-strong">Reset Active Config</span> to get back to the known-good seed state.</div>
       </article>
+      <div class="section-label">Testing &amp; Probes</div>
       <article class="card card-matrix">
         <div class="card-head">
           <h2>Documented Test Matrix</h2>
@@ -1063,6 +1291,7 @@ function renderDashboardHtml() {
             <thead>
               <tr>
                 <th>Model</th>
+                <th>Context</th>
                 <th>Chat OK</th>
                 <th>Tools Payload Accepted</th>
                 <th>Structured Tool Call Returned</th>
@@ -1075,6 +1304,7 @@ function renderDashboardHtml() {
         </div>
         <p class="matrix-note">Direct probe automation covers plain chat, tools payload acceptance, and structured tool-call return via <code>ollama_tool_probe.sh</code>. Telegram path, TUI path, session behavior, and real OpenClaw tool execution are not yet automated in this dashboard.</p>
       </article>
+      <div class="section-label">Logs &amp; History</div>
       <article class="card card-history">
         <div class="card-head">
           <h2>Model History</h2>
@@ -1201,29 +1431,48 @@ function renderDashboardHtml() {
             '<li><strong>Suite detail:</strong> ' + testStatus.suites.map((suite) => suite.name + ' (' + suite.status + ')').join(', ') + '</li>'
           ].join('')
         : '<li class="empty">No regression report has been recorded yet. Run <code>npm run test:regression</code> to populate this panel.</li>';
-      document.getElementById('matrix-body').innerHTML = buildMatrixRows(summary.availableConfiguredModels, payload.probeResults);
+      document.getElementById('matrix-body').innerHTML = buildMatrixRows(summary.availableConfiguredModels, payload.probeResults, summary.modelContextWindows || {});
       document.getElementById('mode-sandbox-button').disabled = summary.currentMode === 'sandbox';
       document.getElementById('mode-live-button').disabled = !summary.liveAvailable || summary.currentMode === 'live';
       renderHealth(payload.health);
+      renderMemory(payload.memory || {});
+      var ctxVal = summary.primaryContextWindow;
+      document.getElementById('primary-context').textContent = ctxVal
+        ? (ctxVal >= 1024 ? Math.round(ctxVal / 1024) + 'K tokens' : ctxVal + ' tokens')
+        : 'Not set';
     }
 
-    function buildMatrixRows(models, probeResults) {
-      const probeByModel = new Map(probeResults.map((entry) => [entry.model, entry]));
+    function formatContextWindow(value) {
+      if (!value || typeof value !== 'number') {
+        return '<span class="chip pending">Unknown</span>';
+      }
 
-      return models.map((model) => {
-        const probe = probeByModel.get(model);
-        const chatOk = probe ? yesNoChip(probe.chatOk === 'yes') : pendingChip('Pending');
-        const toolsAccepted = probe ? yesNoChip(probe.toolsHttp === '200') : pendingChip('Pending');
-        const structuredCall = probe
+      if (value >= 1024) {
+        return '<span class="chip pass">' + Math.round(value / 1024) + 'K</span>';
+      }
+
+      return '<span class="chip pass">' + value + '</span>';
+    }
+
+    function buildMatrixRows(models, probeResults, contextWindows) {
+      var probeByModel = new Map(probeResults.map(function(entry) { return [entry.model, entry]; }));
+
+      return models.map(function(model) {
+        var probe = probeByModel.get(model);
+        var ctx = contextWindows[model] || null;
+        var chatOk = probe ? yesNoChip(probe.chatOk === 'yes') : pendingChip('Pending');
+        var toolsAccepted = probe ? yesNoChip(probe.toolsHttp === '200') : pendingChip('Pending');
+        var structuredCall = probe
           ? yesNoChip(probe.toolsOutcome === 'tool_calls_returned')
           : pendingChip('Pending');
-        const openClawPass = pendingChip('Manual');
-        const notes = probe
+        var openClawPass = pendingChip('Manual');
+        var notes = probe
           ? escapeHtml(probe.toolsSummary || probe.chatSummary || 'Probe recorded')
           : 'Direct Ollama probe not run yet';
 
         return '<tr>' +
           '<td><strong>' + escapeHtml(model) + '</strong></td>' +
+          '<td>' + formatContextWindow(ctx) + '</td>' +
           '<td>' + chatOk + '</td>' +
           '<td>' + toolsAccepted + '</td>' +
           '<td>' + structuredCall + '</td>' +
@@ -1257,24 +1506,46 @@ function renderDashboardHtml() {
         return 'not recorded';
       }
 
-      const date = new Date(value);
+      var date = new Date(value);
       if (Number.isNaN(date.getTime())) {
         return String(value);
       }
 
-      return date.getUTCFullYear() + '-' +
-        String(date.getUTCMonth() + 1).padStart(2, '0') + '-' +
-        String(date.getUTCDate()).padStart(2, '0') + ' ' +
-        String(date.getUTCHours()).padStart(2, '0') + ':' +
-        String(date.getUTCMinutes()).padStart(2, '0') + ':' +
-        String(date.getUTCSeconds()).padStart(2, '0') + ' UTC';
+      var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      var month = months[date.getUTCMonth()];
+      var day = date.getUTCDate();
+      var year = date.getUTCFullYear();
+      var hours = date.getUTCHours();
+      var minutes = String(date.getUTCMinutes()).padStart(2, '0');
+      var ampm = hours >= 12 ? 'PM' : 'AM';
+      var displayHour = hours % 12 || 12;
+      return month + ' ' + day + ', ' + year + ' ' + displayHour + ':' + minutes + ' ' + ampm + ' UTC';
     }
 
     function renderHealth(health) {
       document.getElementById('health-summary').innerHTML = [
-        '<div class="health-tile"><strong>OpenClaw</strong><div class="health-state">' + (health.openclaw.ok ? 'Healthy' : 'Unavailable') + '</div><div class="meta">' + health.openclaw.message + '</div></div>',
-        '<div class="health-tile"><strong>Ollama</strong><div class="health-state">' + (health.ollama.ok ? 'Healthy' : 'Unavailable') + '</div><div class="meta">' + health.ollama.message + '</div></div>'
+        '<div class="health-tile"><strong>OpenClaw</strong><div class="health-state ' + (health.openclaw.ok ? 'is-ok' : 'is-down') + '">' + (health.openclaw.ok ? 'Healthy' : 'Unavailable') + '</div><div class="meta">' + escapeHtml(health.openclaw.message) + '</div></div>',
+        '<div class="health-tile"><strong>Ollama</strong><div class="health-state ' + (health.ollama.ok ? 'is-ok' : 'is-down') + '">' + (health.ollama.ok ? 'Healthy' : 'Unavailable') + '</div><div class="meta">' + escapeHtml(health.ollama.message) + '</div></div>'
       ].join('');
+    }
+
+    function renderMemory(memory) {
+      var sys = memory.system || {};
+      var pct = sys.usagePercent || 0;
+      var barFill = document.getElementById('memory-bar-fill');
+      barFill.style.width = pct + '%';
+      barFill.className = 'memory-bar-fill ' + (pct >= 85 ? 'high' : pct >= 60 ? 'mid' : 'low');
+      document.getElementById('memory-percent').textContent = pct + '%';
+      document.getElementById('memory-total').textContent = sys.totalFormatted || '--';
+      document.getElementById('memory-used').textContent = sys.usedFormatted || '--';
+      document.getElementById('memory-available').textContent = sys.availableFormatted || '--';
+      document.getElementById('model-memory-total').textContent = memory.totalModelMemoryFormatted || '0 B';
+      var models = memory.runningModels || [];
+      document.getElementById('running-models-list').innerHTML = models.length
+        ? models.map(function(m) {
+            return '<li><span class="model-name">' + escapeHtml(m.name) + '</span><span class="model-mem">' + escapeHtml(m.sizeFormatted) + '</span></li>';
+          }).join('')
+        : '<li class="empty">No models loaded.</li>';
     }
 
     function buildHealthStatusMessage(health) {
@@ -1310,7 +1581,6 @@ function renderDashboardHtml() {
       const modelId = document.getElementById('model-select').value;
       const configured = latestState.summary.availableConfiguredModels.includes(modelId);
       const catalogEntry = configured ? null : {
-        notes: 'Promoted from installed Ollama model',
         compat: { supportsTools: false }
       };
       const response = await fetch('/api/config/primary-model', {

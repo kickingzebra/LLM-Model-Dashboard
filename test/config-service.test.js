@@ -10,7 +10,8 @@ const {
   switchPrimaryModel,
   maskSecrets,
   listConfiguredModelIds,
-  listToolCapableConfiguredModels
+  listToolCapableConfiguredModels,
+  getModelContextWindows
 } = require('../src/config-service');
 
 async function createTempConfigFixture() {
@@ -68,13 +69,18 @@ test('can insert a missing model into the ollama catalog while switching', () =>
       contextWindow: 32768,
       compat: {
         supportsTools: false
-      },
-      notes: 'chat-only'
+      }
     }
   });
 
   assert.equal(updated.agents.defaults.model.primary, 'gemma3:12b');
-  assert.equal(updated.models.providers.ollama.models['gemma3:12b'].notes, 'chat-only');
+  const entry = updated.models.providers.ollama.models['gemma3:12b'];
+  assert.equal(entry.contextWindow, 32768);
+  assert.equal(entry.compat.supportsTools, false);
+  assert.ok(
+    !Object.prototype.hasOwnProperty.call(entry, 'notes'),
+    'catalog entry must not carry the non-schema `notes` field'
+  );
 });
 
 test('array-based model catalogs return real model ids instead of numeric indexes', () => {
@@ -376,3 +382,210 @@ test('maskSecrets hides auth and telegram tokens in UI payloads', () => {
   assert.equal(masked.gateway.authToken.includes('super-secret'), false);
   assert.equal(masked.integrations.telegram.botToken.includes('telegram-secret'), false);
 });
+
+test('getModelContextWindows extracts context windows from object-based catalogs', () => {
+  const fixture = require('./fixtures/openclaw.valid.json');
+
+  const result = getModelContextWindows(fixture);
+
+  assert.deepEqual(result, {
+    'llama3.2:3b': 8192,
+    'qwen3:8b': 32768,
+    'llama3.1:8b': 32768
+  });
+});
+
+test('getModelContextWindows extracts context windows from array-based catalogs', () => {
+  const config = {
+    models: {
+      providers: {
+        ollama: {
+          models: [
+            { name: 'llama3.2:3b', contextWindow: 8192, compat: { supportsTools: true } },
+            { name: 'qwen3:8b', contextWindow: 32768, compat: { supportsTools: true } },
+            { name: 'gemma3:12b', compat: { supportsTools: false } }
+          ]
+        }
+      }
+    }
+  };
+
+  const result = getModelContextWindows(config);
+
+  assert.deepEqual(result, {
+    'llama3.2:3b': 8192,
+    'qwen3:8b': 32768
+  });
+});
+
+test('getModelContextWindows returns empty object when no context windows are set', () => {
+  const config = {
+    models: {
+      providers: {
+        ollama: {
+          models: {
+            'llama3.2:3b': { compat: { supportsTools: true } }
+          }
+        }
+      }
+    }
+  };
+
+  const result = getModelContextWindows(config);
+
+  assert.deepEqual(result, {});
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Regression: promoting an Ollama model must produce a schema-compliant entry.
+//
+// Bug discovered 2026-04-17: dashboard wrote `{ name, notes, compat }` which
+// OpenClaw 2026.4.12 rejects. Required fields: id, name, reasoning, input,
+// cost, contextWindow, maxTokens. Unknown fields (like `notes`) must be dropped.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const REQUIRED_OLLAMA_MODEL_FIELDS = [
+  'id',
+  'name',
+  'reasoning',
+  'input',
+  'cost',
+  'contextWindow',
+  'maxTokens'
+];
+
+function arrayCatalogConfig() {
+  return {
+    agents: {
+      defaults: {
+        model: { provider: 'ollama', primary: 'llama3.2:3b' }
+      }
+    },
+    models: {
+      providers: {
+        ollama: {
+          models: [
+            {
+              id: 'llama3.2:3b',
+              name: 'llama3.2:3b',
+              reasoning: false,
+              input: ['text'],
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+              contextWindow: 131072,
+              maxTokens: 8192,
+              compat: { supportsTools: true }
+            }
+          ]
+        }
+      }
+    }
+  };
+}
+
+test('promoting a new model into an array catalog writes all schema-required fields', () => {
+  const config = arrayCatalogConfig();
+
+  const updated = switchPrimaryModel(config, {
+    modelId: 'qwen3.5:27b',
+    addToCatalog: true,
+    catalogEntry: { compat: { supportsTools: false } }
+  });
+
+  const entry = updated.models.providers.ollama.models.find(
+    (m) => m.id === 'qwen3.5:27b' || m.name === 'qwen3.5:27b'
+  );
+
+  assert.ok(entry, 'promoted entry should exist in the catalog');
+  for (const field of REQUIRED_OLLAMA_MODEL_FIELDS) {
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(entry, field),
+      `promoted entry is missing required field "${field}"`
+    );
+  }
+  assert.equal(entry.id, 'qwen3.5:27b');
+  assert.equal(entry.name, 'qwen3.5:27b');
+});
+
+test('promoted entry must NOT include the non-schema "notes" field', () => {
+  const config = arrayCatalogConfig();
+
+  const updated = switchPrimaryModel(config, {
+    modelId: 'gemma3:12b',
+    addToCatalog: true,
+    catalogEntry: {
+      notes: 'Promoted from installed Ollama model',
+      compat: { supportsTools: false }
+    }
+  });
+
+  const entry = updated.models.providers.ollama.models.find(
+    (m) => m.id === 'gemma3:12b' || m.name === 'gemma3:12b'
+  );
+
+  assert.ok(entry, 'promoted entry should exist');
+  assert.ok(
+    !Object.prototype.hasOwnProperty.call(entry, 'notes'),
+    'promoted entry must not carry the non-schema `notes` field'
+  );
+});
+
+test('promoting preserves caller-provided compat.supportsTools', () => {
+  const config = arrayCatalogConfig();
+
+  const updated = switchPrimaryModel(config, {
+    modelId: 'gemma3:4b',
+    addToCatalog: true,
+    catalogEntry: { compat: { supportsTools: true } }
+  });
+
+  const entry = updated.models.providers.ollama.models.find(
+    (m) => m.id === 'gemma3:4b' || m.name === 'gemma3:4b'
+  );
+
+  assert.ok(entry);
+  assert.equal(entry.compat.supportsTools, true);
+});
+
+test('promoting overrides defaults with caller-provided contextWindow and maxTokens', () => {
+  const config = arrayCatalogConfig();
+
+  const updated = switchPrimaryModel(config, {
+    modelId: 'custom-model:1b',
+    addToCatalog: true,
+    catalogEntry: {
+      contextWindow: 16384,
+      maxTokens: 4096,
+      compat: { supportsTools: false }
+    }
+  });
+
+  const entry = updated.models.providers.ollama.models.find(
+    (m) => m.id === 'custom-model:1b' || m.name === 'custom-model:1b'
+  );
+
+  assert.ok(entry);
+  assert.equal(entry.contextWindow, 16384);
+  assert.equal(entry.maxTokens, 4096);
+});
+
+test('promoting applies sensible defaults when caller provides no catalog entry fields', () => {
+  const config = arrayCatalogConfig();
+
+  const updated = switchPrimaryModel(config, {
+    modelId: 'nemotron:4b',
+    addToCatalog: true,
+    catalogEntry: {}
+  });
+
+  const entry = updated.models.providers.ollama.models.find(
+    (m) => m.id === 'nemotron:4b' || m.name === 'nemotron:4b'
+  );
+
+  assert.ok(entry);
+  assert.equal(entry.reasoning, false);
+  assert.deepEqual(entry.input, ['text']);
+  assert.deepEqual(entry.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+  assert.ok(typeof entry.contextWindow === 'number' && entry.contextWindow > 0);
+  assert.ok(typeof entry.maxTokens === 'number' && entry.maxTokens > 0);
+});
+

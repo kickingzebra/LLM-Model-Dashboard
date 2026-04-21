@@ -1,5 +1,6 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { toIsoTimestamp } = require('./utils');
 
 function getOllamaCatalog(config) {
   const catalog = config?.models?.providers?.ollama?.models;
@@ -44,29 +45,70 @@ function getCatalogEntry(config, modelId) {
   return catalog[modelId] || null;
 }
 
+// Fields OpenClaw 2026.4.12 rejects when present on an Ollama catalog entry.
+// Callers historically passed `notes` as a breadcrumb; the schema forbids it.
+const DISALLOWED_CATALOG_FIELDS = ['notes'];
+
+// Defaults applied when a caller promotes a model without specifying every
+// schema-required field. These match OpenClaw's expected shape for an Ollama
+// model entry in an array-style catalog.
+const DEFAULT_OLLAMA_CATALOG_ENTRY = Object.freeze({
+  reasoning: false,
+  input: ['text'],
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  contextWindow: 131072,
+  maxTokens: 8192
+});
+
+function buildSchemaCompliantCatalogEntry(modelId, catalogEntry) {
+  const source = catalogEntry && typeof catalogEntry === 'object' ? catalogEntry : {};
+  const sanitized = { ...source };
+  for (const disallowed of DISALLOWED_CATALOG_FIELDS) {
+    delete sanitized[disallowed];
+  }
+
+  return {
+    id: modelId,
+    name: modelId,
+    reasoning:
+      sanitized.reasoning !== undefined ? sanitized.reasoning : DEFAULT_OLLAMA_CATALOG_ENTRY.reasoning,
+    input: sanitized.input ? [...sanitized.input] : [...DEFAULT_OLLAMA_CATALOG_ENTRY.input],
+    cost: sanitized.cost ? { ...sanitized.cost } : { ...DEFAULT_OLLAMA_CATALOG_ENTRY.cost },
+    contextWindow:
+      sanitized.contextWindow !== undefined
+        ? sanitized.contextWindow
+        : DEFAULT_OLLAMA_CATALOG_ENTRY.contextWindow,
+    maxTokens:
+      sanitized.maxTokens !== undefined ? sanitized.maxTokens : DEFAULT_OLLAMA_CATALOG_ENTRY.maxTokens,
+    ...(sanitized.compat ? { compat: { ...sanitized.compat } } : {})
+  };
+}
+
 function upsertCatalogEntry(config, modelId, catalogEntry) {
   const catalog = getOllamaCatalog(config);
 
   if (Array.isArray(catalog)) {
     const existingIndex = catalog.findIndex((entry) => getCatalogModelId(entry) === modelId);
-    const normalizedEntry =
-      catalogEntry && typeof catalogEntry === 'object'
-        ? { name: modelId, ...catalogEntry }
-        : { name: modelId };
+    const schemaEntry = buildSchemaCompliantCatalogEntry(modelId, catalogEntry);
 
     if (existingIndex === -1) {
-      catalog.push(normalizedEntry);
-      return normalizedEntry;
+      catalog.push(schemaEntry);
+      return schemaEntry;
     }
 
-    catalog[existingIndex] = {
-      ...catalog[existingIndex],
-      ...normalizedEntry
-    };
+    // Preserve any existing schema-valid fields not supplied by the caller,
+    // but always drop disallowed fields from the merged result.
+    const merged = { ...catalog[existingIndex], ...schemaEntry };
+    for (const disallowed of DISALLOWED_CATALOG_FIELDS) {
+      delete merged[disallowed];
+    }
+    catalog[existingIndex] = merged;
     return catalog[existingIndex];
   }
 
-  catalog[modelId] = catalogEntry;
+  // Object-keyed catalog. Still sanitize the entry and guarantee core fields.
+  const schemaEntry = buildSchemaCompliantCatalogEntry(modelId, catalogEntry);
+  catalog[modelId] = schemaEntry;
   return catalog[modelId];
 }
 
@@ -80,6 +122,28 @@ function listToolCapableConfiguredModels(config) {
     .filter((entry) => entry?.compat?.supportsTools === true)
     .map((entry) => getCatalogModelId(entry))
     .filter(Boolean);
+}
+
+function getModelContextWindows(config) {
+  const catalog = getOllamaCatalog(config);
+  const result = {};
+
+  if (Array.isArray(catalog)) {
+    for (const entry of catalog) {
+      const id = getCatalogModelId(entry);
+      if (id && entry.contextWindow) {
+        result[id] = entry.contextWindow;
+      }
+    }
+  } else {
+    for (const [id, entry] of Object.entries(catalog)) {
+      if (entry && typeof entry === 'object' && entry.contextWindow) {
+        result[id] = entry.contextWindow;
+      }
+    }
+  }
+
+  return result;
 }
 
 function validateConfigText(text) {
@@ -285,19 +349,6 @@ function assertPrimaryModelConsistency(config, expectedModelId) {
   }
 }
 
-function toIsoTimestamp(value) {
-  if (typeof value !== 'string' || value.length === 0) {
-    return null;
-  }
-
-  if (/^\d{8}T\d{6}Z?$/.test(value)) {
-    return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}T${value.slice(9, 11)}:${value.slice(11, 13)}:${value.slice(13, 15)}Z`;
-  }
-
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString().replace('.000Z', 'Z');
-}
-
 function maskValue(value) {
   if (typeof value !== 'string' || value.length === 0) {
     return '***';
@@ -491,5 +542,6 @@ module.exports = {
   switchPrimaryModel,
   maskSecrets,
   listConfiguredModelIds,
-  listToolCapableConfiguredModels
+  listToolCapableConfiguredModels,
+  getModelContextWindows
 };

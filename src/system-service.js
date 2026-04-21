@@ -1,5 +1,6 @@
 const fs = require('node:fs/promises');
 const { spawn } = require('node:child_process');
+const { toIsoTimestamp, formatBytes } = require('./utils');
 
 function createSystemService({
   fetchImpl = global.fetch,
@@ -13,6 +14,36 @@ function createSystemService({
   ollamaTagsUrl = 'http://127.0.0.1:11434/api/tags'
 } = {}) {
   return {
+    async getMemoryUsage() {
+      const [ollamaPs, systemMem] = await Promise.all([
+        fetchJson(fetchImpl, ollamaTagsUrl.replace('/api/tags', '/api/ps'), 'Ollama running models'),
+        getSystemMemory(runCommand)
+      ]);
+
+      const runningModels = [];
+      if (ollamaPs.ok && Array.isArray(ollamaPs.body?.models)) {
+        for (const model of ollamaPs.body.models) {
+          runningModels.push({
+            name: model.name || 'unknown',
+            size: model.size || 0,
+            sizeFormatted: formatBytes(model.size || 0),
+            vramSize: model.size_vram || 0,
+            vramFormatted: formatBytes(model.size_vram || 0),
+            expiresAt: model.expires_at || null
+          });
+        }
+      }
+
+      const totalModelMemory = runningModels.reduce(function(sum, m) { return sum + m.size; }, 0);
+
+      return {
+        ok: ollamaPs.ok,
+        system: systemMem,
+        runningModels,
+        totalModelMemory,
+        totalModelMemoryFormatted: formatBytes(totalModelMemory)
+      };
+    },
     async checkHealth() {
       const [openclaw, ollama] = await Promise.all([
         fetchJson(fetchImpl, openclawHealthUrl, 'OpenClaw gateway'),
@@ -260,17 +291,46 @@ function parseModelProbeOutput(stdout) {
   });
 }
 
-function toIsoTimestamp(value) {
-  if (typeof value !== 'string' || value.length === 0) {
-    return null;
-  }
+async function getSystemMemory(runCommand) {
+  try {
+    var result = await runCommand('sh', ['-c',
+      'if [ -f /proc/meminfo ]; then ' +
+        'total=$(grep "^MemTotal:" /proc/meminfo | awk \'{print $2}\'); ' +
+        'avail=$(grep "^MemAvailable:" /proc/meminfo | awk \'{print $2}\'); ' +
+        'echo "$total $avail"; ' +
+      'else ' +
+        'sysctl -n hw.memsize 2>/dev/null && vm_stat 2>/dev/null | head -5; ' +
+      'fi'
+    ]);
 
-  if (/^\d{8}T\d{6}Z?$/.test(value)) {
-    return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}T${value.slice(9, 11)}:${value.slice(11, 13)}:${value.slice(13, 15)}Z`;
-  }
+    if (result.code !== 0) {
+      return { ok: false, totalBytes: 0, usedBytes: 0, availableBytes: 0, usagePercent: 0 };
+    }
 
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString().replace('.000Z', 'Z');
+    var output = result.stdout.trim();
+    var parts = output.split(/\s+/);
+    if (parts.length >= 2 && !isNaN(Number(parts[0]))) {
+      var totalKb = Number(parts[0]);
+      var availKb = Number(parts[1]);
+      var totalBytes = totalKb * 1024;
+      var availBytes = availKb * 1024;
+      var usedBytes = totalBytes - availBytes;
+      return {
+        ok: true,
+        totalBytes: totalBytes,
+        totalFormatted: formatBytes(totalBytes),
+        usedBytes: usedBytes,
+        usedFormatted: formatBytes(usedBytes),
+        availableBytes: availBytes,
+        availableFormatted: formatBytes(availBytes),
+        usagePercent: totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 100) : 0
+      };
+    }
+
+    return { ok: false, totalBytes: 0, usedBytes: 0, availableBytes: 0, usagePercent: 0 };
+  } catch (error) {
+    return { ok: false, totalBytes: 0, usedBytes: 0, availableBytes: 0, usagePercent: 0 };
+  }
 }
 
 async function fetchJson(fetchImpl, url, label) {
