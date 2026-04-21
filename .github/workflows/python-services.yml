@@ -1,0 +1,59 @@
+name: Python Services
+
+on:
+  push:
+    branches:
+      - main
+      - 'feature/**'
+      - 'codex/**'
+    paths:
+      - 'services/**'
+      - '.github/workflows/python-services.yml'
+  pull_request:
+    paths:
+      - 'services/**'
+      - '.github/workflows/python-services.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: python-services-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    name: Unit Tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python:
+          - '3.10'
+          - '3.11'
+          - '3.12'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Show versions
+        run: |
+          python3 --version
+
+      - name: anythingllm-mcp — unit tests (mocked upstream)
+        working-directory: services/anythingllm-mcp
+        run: python3 -m unittest test_server.py -v
+
+      - name: anythingllm-mcp — integration tests skip cleanly when disabled
+        working-directory: services/anythingllm-mcp
+        run: python3 -m unittest test_integration.py -v
+
+      - name: mcp-smoke — syntax check
+        run: python3 -c "import ast; ast.parse(open('services/mcp-smoke/echo.py').read())"
+
+      - name: deploy.sh — shell syntax check
+        run: bash -n services/anythingllm-mcp/deploy.sh

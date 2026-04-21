@@ -3,3 +3,14 @@ local-data/*.bak.*
 local-data/model-history.log.json
 local-data/model-probe-results.json
 local-data/test-regression-report.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# Service secrets — keys and tokens must never be committed
+services/**/.env
+services/**/env
