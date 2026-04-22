@@ -6,13 +6,10 @@ on:
       - main
       - 'feature/**'
       - 'codex/**'
-    paths:
-      - 'services/**'
-      - '.github/workflows/python-services.yml'
+      - 'fix/**'
+      - 'docs/**'
+      - 'rescue/**'
   pull_request:
-    paths:
-      - 'services/**'
-      - '.github/workflows/python-services.yml'
   workflow_dispatch:
 
 concurrency:
