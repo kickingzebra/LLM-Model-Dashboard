@@ -264,8 +264,8 @@ flowchart TB
         Web["web_search (Brave)<br/>web_fetch"]
     end
 
-    T1 -->|@mention| B1
-    T2 -->|@mention| B2
+    T1 -->|"@mention"| B1
+    T2 -->|"@mention"| B2
     B1 --> Router
     B2 --> Router
     Router --> Prompt
