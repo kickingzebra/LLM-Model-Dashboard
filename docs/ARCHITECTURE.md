@@ -219,3 +219,133 @@ openclaw-dashboard/
 - GEEKOM filesystem copy of `anythingllm-mcp` predates main — next real deploy should `git pull` to sync with the merged bugfix version of `deploy.sh`.
 - `fs_read` MCP tool deferred until AnythingLLM-upload friction justifies building it.
 - Context Oracle (separate standalone sidecar at :3025, dev only) overlaps with AnythingLLM and is a candidate for deprecation.
+
+---
+
+## 7. Proposed: two-tier architecture (local + frontier)
+
+Not yet built. Captured here so the shape is agreed before implementation. Dashed edges mark proposed components; solid boxes mark existing pieces that get reused.
+
+### 7.1 Rationale
+
+`qwen3.5:27b` running locally is good enough for routine research, web lookups, daily recall, and topic-scoped RAG. It is noticeably weaker than frontier models on complex reasoning, multi-project planning, and long-range synthesis. Rather than replace the local stack, add a second Telegram bot backed by a frontier API. Cost is controlled because the user — not an auto-router — decides which bot to message.
+
+### 7.2 Component diagram
+
+```mermaid
+flowchart TB
+    subgraph User["User on Telegram"]
+        direction LR
+        T1[Message in topic<br/>e.g. LinkedIn research]
+        T2[Message in topic<br/>e.g. Strategy planning]
+    end
+
+    subgraph Bots["Telegram bots"]
+        direction LR
+        B1["@Noor_geekom_bot<br/>Tier 1 &mdash; local, fast, cheap"]
+        B2["@Noor_frontier_bot<br/>Tier 2 &mdash; frontier, paid<br/>PROPOSED"]
+    end
+
+    subgraph Gateway["OpenClaw gateway (single instance, port 18789)"]
+        Router["Message router<br/>1. which bot? &rarr; picks tier<br/>2. which topic? &rarr; picks workspace"]
+        Prompt["Prompt builder<br/>injects 'default workspace = X' hint<br/>based on topic mapping"]
+    end
+
+    subgraph Models["Model providers"]
+        direction LR
+        Ollama["Ollama :11434<br/>qwen3.5:27b (default)<br/>llama3.2:3b (light)"]
+        Frontier["Anthropic Claude<br/>or OpenAI / Gemini<br/>PROPOSED"]
+    end
+
+    subgraph Shared["Shared tools + RAG (unchanged)"]
+        direction TB
+        MCP["anythingllm-mcp<br/>stdio subprocess"]
+        ALLM["AnythingLLM :3001<br/>Workspaces:<br/>&bull; core-memory<br/>&bull; project-content-repurposer<br/>&bull; linkedin (new)<br/>&bull; strategy (new)"]
+        Web["web_search (Brave)<br/>web_fetch"]
+    end
+
+    T1 -->|@mention| B1
+    T2 -->|@mention| B2
+    B1 --> Router
+    B2 --> Router
+    Router --> Prompt
+    Prompt -->|Tier 1| Ollama
+    Prompt -.->|Tier 2| Frontier
+    Ollama --> MCP
+    Frontier -.-> MCP
+    Ollama --> Web
+    Frontier -.-> Web
+    MCP --> ALLM
+```
+
+### 7.3 Topic &rarr; workspace routing
+
+Same mapping is used by both tiers. The bot choice selects the model; the topic selects the grounding source.
+
+| Telegram topic | `message_thread_id` | AnythingLLM workspace |
+|---|---|---|
+| General | 1 | `core-memory` |
+| LinkedIn research and management | 2 | `linkedin` (new) |
+| Content Repurposer | TBD | `project-content-repurposer` |
+| Strategy / planning | TBD | `strategy` (new) |
+| Personal | TBD | `personal` |
+
+### 7.4 Tier selection &mdash; user-driven
+
+```mermaid
+flowchart LR
+    Q[Question]
+    Q -->|Routine: research, quick recall,<br/>web lookup, daily chat| LB["@Noor_geekom_bot<br/>Tier 1 / local"]
+    Q -->|Complex: reasoning, multi-project<br/>planning, architecture decisions| FB["@Noor_frontier_bot<br/>Tier 2 / frontier"]
+```
+
+No auto-escalation inside a single bot. Typing in the right chat is the cost gate.
+
+### 7.5 Message flow (identical shape, different LLM box)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Zia
+    participant TG as Telegram
+    participant Bot as Bot<br/>(geekom or frontier)
+    participant OC as OpenClaw gateway
+    participant LLM as LLM<br/>(Ollama or Frontier API)
+    participant MCP as anythingllm-mcp
+    participant A as AnythingLLM
+
+    Zia->>TG: question in topic N
+    TG->>Bot: update (message_thread_id=N)
+    Bot->>OC: webhook
+    OC->>OC: lookup topic N &rarr; workspace W<br/>inject "default workspace = W"
+    OC->>LLM: system prompt + user message
+    LLM-->>OC: tool_call rag_query(workspace=W, q=...)
+    OC->>MCP: tools/call
+    MCP->>A: POST /workspace/W/chat
+    A-->>MCP: answer + sources
+    MCP-->>OC: result
+    OC->>LLM: appended to context
+    LLM-->>OC: final reply
+    OC->>TG: message in same topic thread
+    TG->>Zia: grounded answer
+```
+
+### 7.6 Effort estimate
+
+| Piece | Effort | Notes |
+|---|---|---|
+| Topic &rarr; workspace mapping config | ~30 min | Small JSON, in `openclaw.json` or a sidecar |
+| Prompt-builder injection | ~30 min | Reads `message_thread_id` from update, prepends hint |
+| `@Noor_frontier_bot` Telegram setup | ~15 min | BotFather + add to same group |
+| OpenClaw frontier model provider wiring | ~30-60 min | Depends on which provider; Anthropic has simplest SDK |
+| TDD + PR + CI | included | Same pattern as `anythingllm-mcp` |
+| New AnythingLLM workspaces (`linkedin`, `strategy`, etc.) | ~15 min each | Web UI, pin + embed docs |
+
+Total ~2-3 hours for a working MVP, spread across one or two sessions.
+
+### 7.7 Deferred decisions
+
+- Which frontier provider first. Anthropic (Claude) is the default candidate given the user's existing ecosystem. OpenAI / Gemini as fallback.
+- Whether topic routing lives in a new OpenClaw skill or a gateway-level hook. Skill is simpler to ship; hook is tighter integration.
+- Whether the frontier bot should share persona files with local, or run a leaner system prompt (frontier models need less hand-holding — could save 5-10K tokens per turn).
+- Cost caps and per-day budget alerts on frontier API usage.
