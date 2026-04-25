@@ -317,7 +317,7 @@ sequenceDiagram
     Zia->>TG: question in topic N
     TG->>Bot: update (message_thread_id=N)
     Bot->>OC: webhook
-    OC->>OC: lookup topic N &rarr; workspace W<br/>inject "default workspace = W"
+    OC->>OC: resolve topic N to workspace W<br/>inject default-workspace hint into prompt
     OC->>LLM: system prompt + user message
     LLM-->>OC: tool_call rag_query(workspace=W, q=...)
     OC->>MCP: tools/call
